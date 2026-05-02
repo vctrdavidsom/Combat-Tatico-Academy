@@ -1,0 +1,110 @@
+"use client"
+
+import { useState } from "react"
+import { Megaphone, Send } from "lucide-react"
+import { Header } from "@/components/header"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { initialBroadcasts, type BroadcastNotice, type BroadcastPriority } from "@/lib/admin-broadcasts"
+
+export default function BroadcastPage() {
+  const [notices, setNotices] = useState<BroadcastNotice[]>(initialBroadcasts)
+  const [draft, setDraft] = useState({
+    title: "",
+    message: "",
+    priority: "media" as BroadcastPriority
+  })
+
+  const handleSend = () => {
+    if (!draft.title || !draft.message) {
+      return
+    }
+
+    const nextId = Math.max(0, ...notices.map((notice) => notice.id)) + 1
+    setNotices((prev) => [
+      {
+        id: nextId,
+        title: draft.title,
+        message: draft.message,
+        priority: draft.priority,
+        author: "Comando Central",
+        createdAt: new Date().toLocaleDateString('pt-BR')
+      },
+      ...prev
+    ])
+    setDraft({ title: "", message: "", priority: "media" })
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Header userName="Comandante Admin" isAdmin />
+
+      <main className="p-4 md:p-6 space-y-6">
+        <div className="border border-border bg-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+              <Megaphone className="h-5 w-5 text-[#F4511E]" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-foreground">Broadcast Operacional</h1>
+              <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                Avisos gerais para todos os alunos
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="border border-border bg-card p-4 space-y-4">
+          <div className="grid gap-3 md:grid-cols-[1fr_160px]">
+            <Input
+              placeholder="Titulo do aviso"
+              value={draft.title}
+              onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              className="border-border bg-secondary rounded-none"
+            />
+            <select
+              value={draft.priority}
+              onChange={(e) => setDraft({ ...draft, priority: e.target.value as BroadcastPriority })}
+              className="border border-border bg-secondary text-xs uppercase tracking-wider rounded-none px-2 py-2 text-[#6b7a5f]"
+            >
+              <option value="baixa">Baixa</option>
+              <option value="media">Media</option>
+              <option value="alta">Alta</option>
+            </select>
+          </div>
+          <Textarea
+            placeholder="Mensagem operacional"
+            value={draft.message}
+            onChange={(e) => setDraft({ ...draft, message: e.target.value })}
+            className="border-border bg-secondary rounded-none min-h-[120px] resize-none"
+          />
+          <Button
+            onClick={handleSend}
+            className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none w-full sm:w-auto"
+          >
+            <Send className="h-4 w-4 mr-2" />
+            Enviar Aviso
+          </Button>
+        </div>
+
+        <div className="grid gap-4">
+          {notices.map((notice) => (
+            <div key={notice.id} className="border border-border bg-card p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-bold text-foreground">{notice.title}</p>
+                  <p className="text-xs text-[#6b7a5f]">{notice.message}</p>
+                </div>
+                <div className="text-right text-xs text-[#6b7a5f]">
+                  <p className="uppercase tracking-wider">{notice.priority}</p>
+                  <p>{notice.createdAt} • {notice.author}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+    </div>
+  )
+}

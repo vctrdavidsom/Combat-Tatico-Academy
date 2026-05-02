@@ -1,0 +1,1882 @@
+"use client"
+
+import { useState, type Dispatch, type SetStateAction } from "react"
+import { useRouter } from "next/navigation"
+import { 
+  BookOpen, 
+  ArrowLeft,
+  Plus,
+  X,
+  Play,
+  FileText,
+  Link as LinkIcon,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Trash2,
+  GripVertical,
+  Image as ImageIcon,
+  Save,
+  Target,
+  Award
+} from "lucide-react"
+import { Header } from "@/components/header"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
+import { RichTextEditor } from "@/components/admin/rich-text-editor"
+import { initialLibraryItems, type LibraryItem } from "@/lib/admin-library"
+
+type ContentType = "video" | "material" | "activity"
+
+type QuestionType = "multiple" | "essay"
+
+interface Question {
+  id: number
+  type: QuestionType
+  prompt: string
+  options: string[]
+  correctIndex?: number
+}
+
+type MaterialKind = "pdf" | "link" | "file"
+
+interface MaterialAttachment {
+  id: number
+  name: string
+  kind: MaterialKind
+  url: string
+}
+
+interface ContentItem {
+  id: number
+  type: ContentType
+  title: string
+  duration?: string
+  videoId?: string
+  materialPdfUrl?: string
+  materialLinkUrl?: string
+  questions?: Question[]
+  drawCount?: number
+  attemptLimit?: number
+  materials?: MaterialAttachment[]
+}
+
+interface Module {
+  id: number
+  name: string
+  description: string
+  items: ContentItem[]
+  isExpanded: boolean
+}
+
+interface FinalExam {
+  id: number
+  title: string
+  cutScore: number
+  durationMinutes: number
+  questions: Question[]
+  drawCount: number
+  attemptLimit: number
+}
+
+interface CertificateSigner {
+  id: number
+  name: string
+  role: string
+}
+
+interface CertificateConfig {
+  title: string
+  subtitle: string
+  issuer: string
+  sealUrl: string
+  backgroundUrl: string
+  signers: CertificateSigner[]
+  notes: string
+}
+
+interface Course {
+  id: number
+  code: string
+  name: string
+  description: string
+  thumbnail: string
+  totalHours: string
+  status: "ativo" | "rascunho"
+  modules: Module[]
+  finalExam?: FinalExam | null
+  certificateConfig: CertificateConfig
+}
+
+const initialCourse: Course = {
+  id: 1,
+  code: "CQC-001",
+  name: "Táticas de Combate Próximo",
+  description: "<p>Treinamento avancado em tecnicas de combate corpo a corpo e defesa pessoal tatica.</p>",
+  thumbnail: "",
+  totalHours: "40h",
+  status: "ativo",
+  modules: [
+    {
+      id: 1,
+      name: "Módulo 1: Fundamentos",
+      description: "Introdução às técnicas básicas de combate",
+      isExpanded: true,
+      items: [
+        {
+          id: 1,
+          type: "video",
+          title: "Aula 1: Introdução ao Combate Tático",
+          videoId: "jyTUFvYLgUk",
+          duration: "45min"
+        },
+        {
+          id: 2,
+          type: "material",
+          title: "Leitura Guiada: Fundamentos",
+          materialPdfUrl: "#",
+          materialLinkUrl: "#",
+          duration: "20min"
+        },
+        {
+          id: 3,
+          type: "activity",
+          title: "Questionário de Apoio",
+          drawCount: 2,
+          attemptLimit: 2,
+          questions: [
+            {
+              id: 1,
+              type: "multiple",
+              prompt: "Qual é o objetivo principal do controle de distância?",
+              options: ["Imobilização", "Segurança operacional", "Agressão", "Postura teatral"],
+              correctIndex: 1
+            },
+            {
+              id: 2,
+              type: "essay",
+              prompt: "Descreva a postura básica de prontidão em CQC.",
+              options: []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      id: 2,
+      name: "Módulo 2: Técnicas Avançadas",
+      description: "Técnicas avançadas de combate corpo a corpo",
+      isExpanded: false,
+      items: [
+        {
+          id: 4,
+          type: "video",
+          title: "Aula 1: Defesa Pessoal",
+          videoId: "",
+          duration: "50min"
+        }
+      ]
+    }
+  ],
+  finalExam: {
+    id: 1,
+    title: "Exame Final de Certificação",
+    cutScore: 70,
+    durationMinutes: 60,
+    drawCount: 10,
+    attemptLimit: 2,
+    questions: [
+      {
+        id: 1,
+        type: "multiple",
+        prompt: "Qual é o princípio tático base para avanço em ambiente fechado?",
+        options: ["Velocidade", "Silêncio", "Controle de setores", "Imprevisibilidade"],
+        correctIndex: 2
+      }
+    ]
+  },
+  certificateConfig: {
+    title: "Certificado de Conclusao",
+    subtitle: "Combat Tatico Academy",
+    issuer: "Diretoria de Operacoes",
+    sealUrl: "https://example.com/selos/cta-seal.png",
+    backgroundUrl: "https://example.com/certificados/template-dark.png",
+    signers: [
+      { id: 1, name: "Cel. Almeida", role: "Comandante Geral" },
+      { id: 2, name: "Cap. Souza", role: "Instrutor Chefe" }
+    ],
+    notes: "Assinaturas digitais aplicadas automaticamente."
+  }
+}
+
+export default function AdminCourseDetailPage() {
+  const router = useRouter()
+  const [course, setCourse] = useState<Course>(initialCourse)
+  const [activeTab, setActiveTab] = useState<"conteudo" | "certificado">("conteudo")
+  const [showAddModuleModal, setShowAddModuleModal] = useState(false)
+  const [showAddContentModal, setShowAddContentModal] = useState(false)
+  const [showFinalExamModal, setShowFinalExamModal] = useState(false)
+  const [selectedModuleId, setSelectedModuleId] = useState<number | null>(null)
+  const [hasChanges, setHasChanges] = useState(false)
+  
+  const [newModule, setNewModule] = useState({ name: "", description: "" })
+  const [newContentType, setNewContentType] = useState<ContentType>("video")
+  const [newContent, setNewContent] = useState({
+    title: "",
+    videoId: "",
+    duration: "",
+    materialPdfUrl: "",
+    materialLinkUrl: ""
+  })
+  const [newActivityDrawCount, setNewActivityDrawCount] = useState(1)
+  const [newActivityAttemptLimit, setNewActivityAttemptLimit] = useState(1)
+  const [newQuestions, setNewQuestions] = useState<Question[]>([])
+  const [newMaterials, setNewMaterials] = useState<MaterialAttachment[]>([])
+  const [newFinalExam, setNewFinalExam] = useState({
+    title: "Exame Final de Certificação",
+    cutScore: 70,
+    durationMinutes: 60,
+    drawCount: 10,
+    attemptLimit: 2
+  })
+  const [finalExamQuestions, setFinalExamQuestions] = useState<Question[]>([])
+
+  const getNextId = (items: { id: number }[]) => {
+    return Math.max(0, ...items.map((item) => item.id)) + 1
+  }
+
+  const addQuestion = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>
+  ) => {
+    setQuestions((prev) => [
+      ...prev,
+      {
+        id: getNextId(prev),
+        type: "multiple",
+        prompt: "",
+        options: ["", ""],
+        correctIndex: 0
+      }
+    ])
+  }
+
+  const updateQuestion = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>,
+    questionId: number,
+    patch: Partial<Question>
+  ) => {
+    setQuestions((prev) =>
+      prev.map((question) =>
+        question.id === questionId ? { ...question, ...patch } : question
+      )
+    )
+  }
+
+  const updateQuestionType = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>,
+    questionId: number,
+    type: QuestionType
+  ) => {
+    setQuestions((prev) =>
+      prev.map((question) => {
+        if (question.id !== questionId) {
+          return question
+        }
+
+        if (type === "essay") {
+          return { ...question, type, options: [], correctIndex: undefined }
+        }
+
+        return {
+          ...question,
+          type,
+          options: question.options.length ? question.options : ["", ""],
+          correctIndex: question.correctIndex ?? 0
+        }
+      })
+    )
+  }
+
+  const addOption = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>,
+    questionId: number
+  ) => {
+    setQuestions((prev) =>
+      prev.map((question) => {
+        if (question.id !== questionId) {
+          return question
+        }
+
+        return { ...question, options: [...question.options, ""] }
+      })
+    )
+  }
+
+  const updateOption = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>,
+    questionId: number,
+    optionIndex: number,
+    value: string
+  ) => {
+    setQuestions((prev) =>
+      prev.map((question) => {
+        if (question.id !== questionId) {
+          return question
+        }
+
+        const updatedOptions = question.options.map((option, index) =>
+          index === optionIndex ? value : option
+        )
+        return { ...question, options: updatedOptions }
+      })
+    )
+  }
+
+  const removeOption = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>,
+    questionId: number,
+    optionIndex: number
+  ) => {
+    setQuestions((prev) =>
+      prev.map((question) => {
+        if (question.id !== questionId) {
+          return question
+        }
+
+        const updatedOptions = question.options.filter(
+          (_, index) => index !== optionIndex
+        )
+        const correctIndex =
+          question.correctIndex !== undefined
+            ? Math.max(0, Math.min(question.correctIndex, updatedOptions.length - 1))
+            : undefined
+        return { ...question, options: updatedOptions, correctIndex }
+      })
+    )
+  }
+
+  const removeQuestion = (
+    setQuestions: Dispatch<SetStateAction<Question[]>>,
+    questionId: number
+  ) => {
+    setQuestions((prev) => prev.filter((question) => question.id !== questionId))
+  }
+
+  const resetNewContent = () => {
+    setNewContentType("video")
+    setNewContent({
+      title: "",
+      videoId: "",
+      duration: "",
+      materialPdfUrl: "",
+      materialLinkUrl: ""
+    })
+    setNewActivityDrawCount(1)
+    setNewActivityAttemptLimit(1)
+    setNewQuestions([])
+    setNewMaterials([])
+  }
+
+  const libraryItems = initialLibraryItems
+
+  const addSigner = () => {
+    setCourse((prev) => ({
+      ...prev,
+      certificateConfig: {
+        ...prev.certificateConfig,
+        signers: [
+          ...prev.certificateConfig.signers,
+          {
+            id: getNextId(prev.certificateConfig.signers),
+            name: "",
+            role: ""
+          }
+        ]
+      }
+    }))
+    setHasChanges(true)
+  }
+
+  const updateSigner = (signerId: number, patch: Partial<CertificateSigner>) => {
+    setCourse((prev) => ({
+      ...prev,
+      certificateConfig: {
+        ...prev.certificateConfig,
+        signers: prev.certificateConfig.signers.map((signer) =>
+          signer.id === signerId ? { ...signer, ...patch } : signer
+        )
+      }
+    }))
+    setHasChanges(true)
+  }
+
+  const removeSigner = (signerId: number) => {
+    setCourse((prev) => ({
+      ...prev,
+      certificateConfig: {
+        ...prev.certificateConfig,
+        signers: prev.certificateConfig.signers.filter(
+          (signer) => signer.id !== signerId
+        )
+      }
+    }))
+    setHasChanges(true)
+  }
+
+  const applyLibraryToMaterial = (item: LibraryItem) => {
+    if (item.type === "pdf") {
+      setNewContent((prev) => ({ ...prev, materialPdfUrl: item.url }))
+    } else {
+      setNewContent((prev) => ({ ...prev, materialLinkUrl: item.url }))
+    }
+  }
+
+  const addLibraryAttachmentToLesson = (item: LibraryItem) => {
+    setNewMaterials((prev) => [
+      ...prev,
+      {
+        id: getNextId(prev),
+        name: item.title,
+        kind: item.type,
+        url: item.url
+      }
+    ])
+  }
+
+  const addMaterialAttachment = () => {
+    setNewMaterials((prev) => [
+      ...prev,
+      {
+        id: getNextId(prev),
+        name: "",
+        kind: "pdf",
+        url: ""
+      }
+    ])
+  }
+
+  const updateMaterialAttachment = (
+    attachmentId: number,
+    patch: Partial<MaterialAttachment>
+  ) => {
+    setNewMaterials((prev) =>
+      prev.map((attachment) =>
+        attachment.id === attachmentId ? { ...attachment, ...patch } : attachment
+      )
+    )
+  }
+
+  const removeMaterialAttachment = (attachmentId: number) => {
+    setNewMaterials((prev) => prev.filter((attachment) => attachment.id !== attachmentId))
+  }
+
+  const toggleModule = (moduleId: number) => {
+    setCourse({
+      ...course,
+      modules: course.modules.map(m => 
+        m.id === moduleId ? { ...m, isExpanded: !m.isExpanded } : m
+      )
+    })
+  }
+
+  const handleAddModule = () => {
+    if (newModule.name) {
+      const newId = Math.max(0, ...course.modules.map(m => m.id)) + 1
+      setCourse({
+        ...course,
+        modules: [
+          ...course.modules,
+          {
+            id: newId,
+            name: newModule.name,
+            description: newModule.description,
+            items: [],
+            isExpanded: true
+          }
+        ]
+      })
+      setNewModule({ name: "", description: "" })
+      setShowAddModuleModal(false)
+      setHasChanges(true)
+    }
+  }
+
+  const handleAddContent = () => {
+    if (!newContent.title || !selectedModuleId) {
+      return
+    }
+
+    if (newContentType === "activity" && newQuestions.length < newActivityDrawCount) {
+      return
+    }
+
+    setCourse({
+      ...course,
+      modules: course.modules.map((module) => {
+        if (module.id !== selectedModuleId) {
+          return module
+        }
+
+        const newItemId = getNextId(module.items)
+        let newItem: ContentItem
+
+        if (newContentType === "video") {
+          newItem = {
+            id: newItemId,
+            type: "video",
+            title: newContent.title,
+            videoId: newContent.videoId,
+            duration: newContent.duration,
+            materials: newMaterials
+              .filter((attachment) => attachment.name || attachment.url)
+              .map((attachment) => ({
+                ...attachment,
+                name: attachment.name || "Material",
+                url: attachment.url || "#"
+              }))
+          }
+        } else if (newContentType === "material") {
+          newItem = {
+            id: newItemId,
+            type: "material",
+            title: newContent.title,
+            videoId: newContent.videoId,
+            duration: newContent.duration,
+            materialPdfUrl: newContent.materialPdfUrl,
+            materialLinkUrl: newContent.materialLinkUrl
+          }
+        } else {
+          newItem = {
+            id: newItemId,
+            type: "activity",
+            title: newContent.title,
+            drawCount: newActivityDrawCount,
+            questions: newQuestions.map((question) => ({
+              ...question,
+              options: question.type === "multiple" ? question.options : []
+            }))
+          }
+        }
+
+        return {
+          ...module,
+          items: [...module.items, newItem]
+        }
+      })
+    })
+
+    setHasChanges(true)
+    resetNewContent()
+    setSelectedModuleId(null)
+    setShowAddContentModal(false)
+  }
+
+  const handleDeleteModule = (moduleId: number) => {
+    setCourse({
+      ...course,
+      modules: course.modules.filter(m => m.id !== moduleId)
+    })
+    setHasChanges(true)
+  }
+
+  const handleDeleteItem = (moduleId: number, itemId: number) => {
+    setCourse({
+      ...course,
+      modules: course.modules.map((module) => {
+        if (module.id !== moduleId) {
+          return module
+        }
+
+        return {
+          ...module,
+          items: module.items.filter((item) => item.id !== itemId)
+        }
+      })
+    })
+    setHasChanges(true)
+  }
+
+  const openAddContentModal = (moduleId: number) => {
+    resetNewContent()
+    setSelectedModuleId(moduleId)
+    setShowAddContentModal(true)
+  }
+
+  const openFinalExamModal = () => {
+    if (course.finalExam) {
+      setNewFinalExam({
+        title: course.finalExam.title,
+        cutScore: course.finalExam.cutScore,
+        durationMinutes: course.finalExam.durationMinutes,
+        drawCount: course.finalExam.drawCount
+      })
+      setFinalExamQuestions(course.finalExam.questions)
+    } else {
+      setNewFinalExam({
+        title: "Exame Final de Certificação",
+        cutScore: 70,
+        durationMinutes: 60,
+        drawCount: 10
+      })
+      setFinalExamQuestions([])
+    }
+    setShowFinalExamModal(true)
+  }
+
+  const handleSaveFinalExam = () => {
+    if (!newFinalExam.title) {
+      return
+    }
+
+    if (finalExamQuestions.length < newFinalExam.drawCount) {
+      return
+    }
+
+    setCourse({
+      ...course,
+      finalExam: {
+        id: course.finalExam?.id ?? 1,
+        title: newFinalExam.title,
+        cutScore: newFinalExam.cutScore,
+        durationMinutes: newFinalExam.durationMinutes,
+        drawCount: newFinalExam.drawCount,
+        questions: finalExamQuestions.map((question) => ({
+          ...question,
+          options: question.type === "multiple" ? question.options : []
+        }))
+      }
+    })
+    setHasChanges(true)
+    setShowFinalExamModal(false)
+  }
+
+  const handleRemoveFinalExam = () => {
+    setCourse({
+      ...course,
+      finalExam: null
+    })
+    setHasChanges(true)
+  }
+
+  const getContentIcon = (type: ContentType) => {
+    switch (type) {
+      case "video":
+        return <Play className="h-3 w-3" />
+      case "material":
+        return <FileText className="h-3 w-3" />
+      case "activity":
+        return <Target className="h-3 w-3" />
+      default:
+        return <FileText className="h-3 w-3" />
+    }
+  }
+
+  const getContentLabel = (type: ContentType) => {
+    switch (type) {
+      case "video":
+        return "Vídeo"
+      case "material":
+        return "Material"
+      case "activity":
+        return "Atividade"
+      default:
+        return "Conteúdo"
+    }
+  }
+
+  const totalItems = course.modules.reduce((acc, module) => acc + module.items.length, 0)
+  const isContentValid =
+    newContent.title &&
+    (newContentType === "video"
+      ? Boolean(newContent.videoId)
+      : newContentType === "material"
+        ? Boolean(newContent.materialPdfUrl || newContent.materialLinkUrl)
+        : newQuestions.length >= newActivityDrawCount && newActivityDrawCount > 0)
+  const isFinalExamValid =
+    newFinalExam.title &&
+    newFinalExam.drawCount > 0 &&
+    finalExamQuestions.length >= newFinalExam.drawCount
+
+  const renderQuestionBuilder = (
+    questions: Question[],
+    setQuestions: Dispatch<SetStateAction<Question[]>>
+  ) => (
+    <div className="space-y-3">
+      {questions.length === 0 && (
+        <p className="text-xs text-[#6b7a5f]">
+          Nenhuma pergunta adicionada ainda.
+        </p>
+      )}
+
+      {questions.map((question) => (
+        <div key={question.id} className="border border-border p-3 bg-secondary/20">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Input
+              placeholder="Digite o enunciado da pergunta..."
+              value={question.prompt}
+              onChange={(e) =>
+                updateQuestion(setQuestions, question.id, { prompt: e.target.value })
+              }
+              className="border-border bg-secondary rounded-none"
+            />
+            <div className="flex items-center gap-2">
+              <select
+                value={question.type}
+                onChange={(e) =>
+                  updateQuestionType(
+                    setQuestions,
+                    question.id,
+                    e.target.value as QuestionType
+                  )
+                }
+                className="border border-border bg-secondary text-xs uppercase tracking-wider rounded-none px-2 py-2 text-[#6b7a5f]"
+              >
+                <option value="multiple">Múltipla</option>
+                <option value="essay">Dissertativa</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => removeQuestion(setQuestions, question.id)}
+                className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                title="Remover pergunta"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {question.type === "multiple" ? (
+            <div className="mt-3 space-y-2">
+              {question.options.map((option, optionIndex) => (
+                <div key={optionIndex} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`question-${question.id}`}
+                    checked={question.correctIndex === optionIndex}
+                    onChange={() =>
+                      updateQuestion(setQuestions, question.id, {
+                        correctIndex: optionIndex
+                      })
+                    }
+                    className="h-4 w-4 accent-[#F4511E]"
+                  />
+                  <Input
+                    placeholder={`Alternativa ${optionIndex + 1}`}
+                    value={option}
+                    onChange={(e) =>
+                      updateOption(setQuestions, question.id, optionIndex, e.target.value)
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeOption(setQuestions, question.id, optionIndex)}
+                    className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                    title="Remover alternativa"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => addOption(setQuestions, question.id)}
+                className="border-border rounded-none"
+              >
+                Adicionar Alternativa
+              </Button>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-[#6b7a5f]">
+              Resposta dissertativa livre (sem alternativas).
+            </p>
+          )}
+        </div>
+      ))}
+
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => addQuestion(setQuestions)}
+        className="border-border rounded-none w-full"
+      >
+        Adicionar Pergunta
+      </Button>
+    </div>
+  )
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Header userName="Comandante Admin" isAdmin />
+
+      <main className="p-4 md:p-6">
+        {/* Back Button */}
+        <button
+          onClick={() => router.push("/admin/cursos")}
+          className="flex items-center gap-2 text-[#6b7a5f] hover:text-foreground transition-colors mb-6"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="text-sm uppercase tracking-wider">Voltar para Cursos</span>
+        </button>
+
+        {/* Course Header */}
+        <div className="border border-border bg-card p-4 mb-6 sm:p-6">
+          <div className="flex flex-col lg:flex-row gap-6">
+            {/* Thumbnail */}
+            <div className="w-full lg:w-64 aspect-video bg-secondary border border-border flex items-center justify-center shrink-0">
+              {course.thumbnail ? (
+                <img 
+                  src={course.thumbnail} 
+                  alt={course.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="text-center">
+                  <ImageIcon className="h-8 w-8 text-[#6b7a5f] mx-auto mb-1" />
+                  <span className="text-xs text-[#6b7a5f]">Sem thumbnail</span>
+                </div>
+              )}
+            </div>
+
+            {/* Info */}
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-col items-start justify-between gap-3 mb-4 sm:flex-row sm:items-start">
+                <div className="min-w-0">
+                  <span className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    {course.code}
+                  </span>
+                  <h1 className="text-2xl font-bold text-foreground">{course.name}</h1>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`text-xs px-2 py-1 uppercase tracking-wider ${
+                    course.status === "ativo" 
+                      ? "text-green-500 bg-green-500/10" 
+                      : "text-yellow-500 bg-yellow-500/10"
+                  }`}>
+                    {course.status}
+                  </span>
+                  <Switch 
+                    checked={course.status === "ativo"}
+                    onCheckedChange={(checked) => {
+                      setCourse({ ...course, status: checked ? "ativo" : "rascunho" })
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+              </div>
+              <div
+                className="text-[#6b7a5f] mb-4 text-sm"
+                dangerouslySetInnerHTML={{ __html: course.description }}
+              />
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div className="flex items-center gap-2 text-[#6b7a5f]">
+                  <Clock className="h-4 w-4" />
+                  <span>{course.totalHours}</span>
+                </div>
+                <div className="flex items-center gap-2 text-[#6b7a5f]">
+                  <BookOpen className="h-4 w-4" />
+                  <span>{course.modules.length} módulos</span>
+                </div>
+                <div className="flex items-center gap-2 text-[#6b7a5f]">
+                  <Play className="h-4 w-4" />
+                  <span>{totalItems} conteúdos</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-2 mb-6 border-b border-border sm:gap-4">
+          <button
+            onClick={() => setActiveTab("conteudo")}
+            className={`pb-3 text-xs uppercase tracking-wider transition-colors sm:text-sm ${
+              activeTab === "conteudo"
+                ? "text-[#F4511E] border-b-2 border-[#F4511E]"
+                : "text-[#6b7a5f] hover:text-foreground"
+            }`}
+          >
+            Conteudo e Avaliacoes
+          </button>
+          <button
+            onClick={() => setActiveTab("certificado")}
+            className={`pb-3 text-xs uppercase tracking-wider transition-colors sm:text-sm ${
+              activeTab === "certificado"
+                ? "text-[#F4511E] border-b-2 border-[#F4511E]"
+                : "text-[#6b7a5f] hover:text-foreground"
+            }`}
+          >
+            Certificado
+          </button>
+        </div>
+
+        {activeTab === "conteudo" && (
+          <>
+            <div className="border border-border bg-card p-4 mb-6">
+              <RichTextEditor
+                label="Manual tatico"
+                value={course.description}
+                onChange={(value) => {
+                  setCourse((prev) => ({ ...prev, description: value }))
+                  setHasChanges(true)
+                }}
+                placeholder="Descreva o manual tatico completo do curso..."
+              />
+            </div>
+
+            {/* Modules Section Header */}
+            <div className="flex flex-col items-start justify-between gap-3 mb-4 sm:flex-row sm:items-center">
+              <h2 className="text-lg font-bold text-foreground">Módulos e Conteúdos</h2>
+              <Button 
+                onClick={() => setShowAddModuleModal(true)}
+                className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none w-full sm:w-auto"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Novo Módulo
+              </Button>
+            </div>
+
+            {/* Modules List */}
+            <div className="space-y-4">
+              {course.modules.map((module, moduleIndex) => (
+                <div key={module.id} className="border border-border bg-card">
+              {/* Module Header */}
+              <div 
+                className="flex flex-col justify-between gap-3 p-4 cursor-pointer hover:bg-secondary/30 transition-colors sm:flex-row sm:items-center"
+                onClick={() => toggleModule(module.id)}
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <GripVertical className="h-4 w-4 text-[#6b7a5f] cursor-grab" />
+                  <div className="flex h-8 w-8 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10 text-sm font-bold text-[#F4511E]">
+                    {moduleIndex + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-foreground">{module.name}</h3>
+                    <p className="text-xs text-[#6b7a5f]">{module.items.length} conteúdos</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteModule(module.id)
+                    }}
+                    className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  {module.isExpanded ? (
+                    <ChevronUp className="h-5 w-5 text-[#6b7a5f]" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5 text-[#6b7a5f]" />
+                  )}
+                </div>
+              </div>
+
+              {/* Module Content - Items */}
+              {module.isExpanded && (
+                <div className="border-t border-border">
+                  {module.items.length === 0 && (
+                    <div className="p-4 text-xs text-[#6b7a5f]">
+                      Nenhum conteúdo cadastrado neste módulo.
+                    </div>
+                  )}
+
+                  {module.items.map((item, itemIndex) => (
+                    <div key={item.id} className="border-b border-border last:border-b-0">
+                      <div className="flex flex-col justify-between gap-3 p-4 bg-secondary/20 sm:flex-row sm:items-start">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="flex h-6 w-6 items-center justify-center border border-[#6b7a5f] text-xs font-medium text-[#6b7a5f] mt-0.5">
+                            {itemIndex + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="flex items-center gap-1 text-xs text-[#F4511E] uppercase tracking-wider">
+                                {getContentIcon(item.type)}
+                                {getContentLabel(item.type)}
+                              </span>
+                              <h4 className="font-medium text-foreground text-sm break-words">
+                                {item.title}
+                              </h4>
+                            </div>
+
+                            {item.type === "video" && (
+                              <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-[#6b7a5f]">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  {item.duration || "Sem duração"}
+                                </span>
+                                <span className="flex items-center gap-1 break-all">
+                                  <Play className="h-3 w-3" />
+                                  {item.videoId ? `YouTube ID: ${item.videoId}` : "YouTube ID não informado"}
+                                </span>
+                              </div>
+                            )}
+
+                            {item.type === "video" && item.materials && item.materials.length > 0 && (
+                              <div className="mt-2 space-y-1 text-xs text-[#6b7a5f]">
+                                <span className="text-[10px] uppercase tracking-wider text-[#6b7a5f]">
+                                  Materiais da aula
+                                </span>
+                                <div className="flex flex-wrap gap-2">
+                                  {item.materials.map((attachment) => (
+                                    <div
+                                      key={attachment.id}
+                                      className="flex items-center gap-2 px-2 py-1 bg-secondary border border-border"
+                                    >
+                                      <FileText className="h-3 w-3" />
+                                      <span className="break-words">
+                                        {attachment.name} ({attachment.kind})
+                                      </span>
+                                      <span className="break-all text-[#F4511E]">
+                                        {attachment.url}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {item.type === "material" && (
+                              <div className="mt-2 space-y-1 text-xs text-[#6b7a5f]">
+                                <div className="flex flex-wrap items-center gap-2 break-all">
+                                  <FileText className="h-3 w-3" />
+                                  <span>
+                                    {item.materialPdfUrl
+                                      ? `PDF: ${item.materialPdfUrl}`
+                                      : "PDF não informado"}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 break-all">
+                                  <LinkIcon className="h-3 w-3" />
+                                  <span>
+                                    {item.materialLinkUrl
+                                      ? `Link: ${item.materialLinkUrl}`
+                                      : "Link não informado"}
+                                  </span>
+                                </div>
+                                {item.videoId && (
+                                  <div className="flex flex-wrap items-center gap-2 break-all">
+                                    <Play className="h-3 w-3" />
+                                    <span>YouTube ID: {item.videoId}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {item.type === "activity" && (
+                              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[#6b7a5f]">
+                                <span className="flex items-center gap-1">
+                                  <Target className="h-3 w-3" />
+                                  Banco: {item.questions?.length ?? 0} perguntas
+                                </span>
+                                <span className="uppercase tracking-wider">
+                                  Sorteio: {item.drawCount ?? 0}
+                                </span>
+                                <span className="uppercase tracking-wider">Questionário de apoio</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDeleteItem(module.id, item.id)}
+                            className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                            title="Remover conteúdo"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="p-3">
+                    <button
+                      onClick={() => openAddContentModal(module.id)}
+                      className="flex items-center gap-2 text-sm text-[#6b7a5f] hover:text-[#F4511E] transition-colors w-full justify-center py-2 border border-dashed border-border hover:border-[#F4511E]"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar Conteúdo
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+              {course.modules.length === 0 && (
+                <div className="border border-border bg-card p-8 text-center">
+                  <BookOpen className="h-12 w-12 text-[#6b7a5f] mx-auto mb-3" />
+                  <p className="text-[#6b7a5f] mb-4">Nenhum módulo cadastrado.</p>
+                  <Button 
+                    onClick={() => setShowAddModuleModal(true)}
+                    className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Criar Primeiro Módulo
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Final Exam Section */}
+            <div className="border border-border bg-card mt-8">
+          <div className="p-4 border-b border-border flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                <Award className="h-5 w-5 text-[#F4511E]" />
+              </div>
+              <div>
+                <h3 className="font-bold text-foreground">Exame Final (Certificação)</h3>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                  Avaliação obrigatória para certificação
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 w-full sm:flex-row sm:w-auto">
+              {course.finalExam && (
+                <Button
+                  variant="outline"
+                  onClick={handleRemoveFinalExam}
+                  className="border-border rounded-none w-full sm:w-auto"
+                >
+                  Remover Exame
+                </Button>
+              )}
+              <Button
+                onClick={openFinalExamModal}
+                className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none w-full sm:w-auto"
+              >
+                {course.finalExam ? "Editar Exame" : "Adicionar Exame Final"}
+              </Button>
+            </div>
+          </div>
+
+          {course.finalExam ? (
+            <div className="p-4">
+              <div className="flex flex-wrap items-center gap-4 text-sm text-[#6b7a5f]">
+                <span className="flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  Nota de corte: {course.finalExam.cutScore}%
+                </span>
+                <span className="flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Tempo limite: {course.finalExam.durationMinutes} min
+                </span>
+                <span className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Banco: {course.finalExam.questions.length}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  Sorteio: {course.finalExam.drawCount}
+                </span>
+              </div>
+              <p className="text-xs text-[#6b7a5f] mt-3">
+                Este exame aparece ao final do curso e libera o certificado após aprovação.
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 text-xs text-[#6b7a5f]">
+              Nenhum exame final configurado.
+            </div>
+          )}
+            </div>
+          </>
+        )}
+
+        {activeTab === "certificado" && (
+          <div className="space-y-6">
+            <div className="border border-border bg-card p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <Award className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">Emissor de Certificados</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Configure assinaturas, selo e layout do certificado
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-border bg-card p-4 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Titulo do certificado
+                  </label>
+                  <Input
+                    value={course.certificateConfig.title}
+                    onChange={(e) => {
+                      setCourse((prev) => ({
+                        ...prev,
+                        certificateConfig: {
+                          ...prev.certificateConfig,
+                          title: e.target.value
+                        }
+                      }))
+                      setHasChanges(true)
+                    }}
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Subtitulo
+                  </label>
+                  <Input
+                    value={course.certificateConfig.subtitle}
+                    onChange={(e) => {
+                      setCourse((prev) => ({
+                        ...prev,
+                        certificateConfig: {
+                          ...prev.certificateConfig,
+                          subtitle: e.target.value
+                        }
+                      }))
+                      setHasChanges(true)
+                    }}
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Emissor
+                  </label>
+                  <Input
+                    value={course.certificateConfig.issuer}
+                    onChange={(e) => {
+                      setCourse((prev) => ({
+                        ...prev,
+                        certificateConfig: {
+                          ...prev.certificateConfig,
+                          issuer: e.target.value
+                        }
+                      }))
+                      setHasChanges(true)
+                    }}
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    URL do selo
+                  </label>
+                  <Input
+                    value={course.certificateConfig.sealUrl}
+                    onChange={(e) => {
+                      setCourse((prev) => ({
+                        ...prev,
+                        certificateConfig: {
+                          ...prev.certificateConfig,
+                          sealUrl: e.target.value
+                        }
+                      }))
+                      setHasChanges(true)
+                    }}
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    URL do background
+                  </label>
+                  <Input
+                    value={course.certificateConfig.backgroundUrl}
+                    onChange={(e) => {
+                      setCourse((prev) => ({
+                        ...prev,
+                        certificateConfig: {
+                          ...prev.certificateConfig,
+                          backgroundUrl: e.target.value
+                        }
+                      }))
+                      setHasChanges(true)
+                    }}
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Assinaturas
+                </p>
+                <div className="space-y-3">
+                  {course.certificateConfig.signers.map((signer) => (
+                    <div key={signer.id} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
+                      <Input
+                        placeholder="Nome"
+                        value={signer.name}
+                        onChange={(e) => updateSigner(signer.id, { name: e.target.value })}
+                        className="border-border bg-secondary rounded-none"
+                      />
+                      <Input
+                        placeholder="Cargo"
+                        value={signer.role}
+                        onChange={(e) => updateSigner(signer.id, { role: e.target.value })}
+                        className="border-border bg-secondary rounded-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeSigner(signer.id)}
+                        className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                        title="Remover assinatura"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addSigner}
+                    className="border-border rounded-none"
+                  >
+                    Adicionar Assinatura
+                  </Button>
+                </div>
+              </div>
+
+              <RichTextEditor
+                label="Notas e clausulas"
+                value={course.certificateConfig.notes}
+                onChange={(value) => {
+                  setCourse((prev) => ({
+                    ...prev,
+                    certificateConfig: {
+                      ...prev.certificateConfig,
+                      notes: value
+                    }
+                  }))
+                  setHasChanges(true)
+                }}
+                placeholder="Inclua observacoes legais e regras do certificado..."
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Save Changes Button */}
+        {hasChanges && (
+          <div className="fixed bottom-4 left-4 right-4 sm:bottom-6 sm:left-auto sm:right-6">
+            <Button 
+              onClick={() => setHasChanges(false)}
+              className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none shadow-lg w-full sm:w-auto"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Salvar Alterações
+            </Button>
+          </div>
+        )}
+      </main>
+
+      {/* Add Module Modal */}
+      {showAddModuleModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-card border border-border w-full max-w-md max-h-[calc(100vh-2rem)] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <BookOpen className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Novo Módulo</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Adicionar módulo ao curso
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowAddModuleModal(false)}
+                className="text-[#6b7a5f] hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 min-h-0 overflow-y-auto">
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Nome do Módulo *
+                </label>
+                <Input
+                  placeholder="Ex: Módulo 1: Fundamentos"
+                  value={newModule.name}
+                  onChange={(e) => setNewModule({ ...newModule, name: e.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Descrição
+                </label>
+                <Textarea
+                  placeholder="Descrição breve do módulo..."
+                  value={newModule.description}
+                  onChange={(e) => setNewModule({ ...newModule, description: e.target.value })}
+                  className="border-border bg-secondary rounded-none min-h-[80px] resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
+              <Button 
+                variant="outline"
+                onClick={() => setShowAddModuleModal(false)}
+                className="flex-1 border-border rounded-none"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleAddModule}
+                disabled={!newModule.name}
+                className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
+              >
+                Adicionar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Content Modal */}
+      {showAddContentModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-card border border-border w-full max-w-2xl max-h-[calc(100vh-2rem)] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <Play className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Novo Conteúdo</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Configurar vídeo, material ou atividade
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAddContentModal(false)
+                  setSelectedModuleId(null)
+                }}
+                className="text-[#6b7a5f] hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 min-h-0 overflow-y-auto">
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Título do Conteúdo *
+                </label>
+                <Input
+                  placeholder="Ex: Aula 1, Leitura Guiada, Questionário"
+                  value={newContent.title}
+                  onChange={(e) => setNewContent({ ...newContent, title: e.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Tipo de Conteúdo
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  {[
+                    { value: "video", label: "Vídeo", icon: Play },
+                    { value: "material", label: "Material", icon: FileText },
+                    { value: "activity", label: "Atividade", icon: Target }
+                  ].map((type) => (
+                    <button
+                      key={type.value}
+                      type="button"
+                      onClick={() => {
+                        setNewContentType(type.value as ContentType)
+                        if (type.value !== "activity") {
+                          setNewQuestions([])
+                        }
+                      }}
+                      className={`flex-1 flex items-center justify-center gap-2 p-3 border transition-colors ${
+                        newContentType === type.value
+                          ? "border-[#F4511E] bg-[#F4511E]/10 text-[#F4511E]"
+                          : "border-border text-[#6b7a5f] hover:border-[#6b7a5f]"
+                      }`}
+                    >
+                      <type.icon className="h-4 w-4" />
+                      <span className="text-xs uppercase">{type.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(newContentType === "video" || newContentType === "material") && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                      youtube_id {newContentType === "material" ? "(opcional)" : "*"}
+                    </label>
+                    <Input
+                      placeholder="Ex: jyTUFvYLgUk"
+                      value={newContent.videoId}
+                      onChange={(e) => setNewContent({ ...newContent, videoId: e.target.value })}
+                      className="border-border bg-secondary rounded-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                      Duração
+                    </label>
+                    <Input
+                      placeholder="Ex: 45min"
+                      value={newContent.duration}
+                      onChange={(e) => setNewContent({ ...newContent, duration: e.target.value })}
+                      className="border-border bg-secondary rounded-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {newContentType === "video" && (
+                <p className="text-xs text-[#6b7a5f]">
+                  O youtube_id é obrigatório para conteúdos de vídeo.
+                </p>
+              )}
+
+              {newContentType === "video" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-[#F4511E]" />
+                    <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                      Materiais da aula
+                    </h3>
+                  </div>
+                  {newMaterials.length === 0 && (
+                    <p className="text-xs text-[#6b7a5f]">
+                      Nenhum material anexado ainda.
+                    </p>
+                  )}
+                  {newMaterials.map((attachment) => (
+                    <div key={attachment.id} className="grid grid-cols-1 gap-2 md:grid-cols-[120px_1fr_1fr_auto]">
+                      <select
+                        value={attachment.kind}
+                        onChange={(e) =>
+                          updateMaterialAttachment(attachment.id, {
+                            kind: e.target.value as MaterialKind
+                          })
+                        }
+                        className="border border-border bg-secondary text-xs uppercase tracking-wider rounded-none px-2 py-2 text-[#6b7a5f]"
+                      >
+                        <option value="pdf">PDF</option>
+                        <option value="link">Link</option>
+                        <option value="file">Arquivo</option>
+                      </select>
+                      <Input
+                        placeholder="Nome do material"
+                        value={attachment.name}
+                        onChange={(e) =>
+                          updateMaterialAttachment(attachment.id, {
+                            name: e.target.value
+                          })
+                        }
+                        className="border-border bg-secondary rounded-none"
+                      />
+                      <Input
+                        placeholder="URL do material"
+                        value={attachment.url}
+                        onChange={(e) =>
+                          updateMaterialAttachment(attachment.id, {
+                            url: e.target.value
+                          })
+                        }
+                        className="border-border bg-secondary rounded-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeMaterialAttachment(attachment.id)}
+                        className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                        title="Remover material"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addMaterialAttachment}
+                    className="border-border rounded-none w-full"
+                  >
+                    Adicionar Material
+                  </Button>
+                  <p className="text-xs text-[#6b7a5f]">
+                    Materiais são opcionais e ficam ligados a esta aula.
+                  </p>
+                </div>
+              )}
+
+              {newContentType === "material" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                      PDF (URL)
+                    </label>
+                    <Input
+                      placeholder="https://..."
+                      value={newContent.materialPdfUrl}
+                      onChange={(e) => setNewContent({ ...newContent, materialPdfUrl: e.target.value })}
+                      className="border-border bg-secondary rounded-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                      Link de Leitura
+                    </label>
+                    <Input
+                      placeholder="https://..."
+                      value={newContent.materialLinkUrl}
+                      onChange={(e) => setNewContent({ ...newContent, materialLinkUrl: e.target.value })}
+                      className="border-border bg-secondary rounded-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(newContentType === "video" || newContentType === "material") && (
+                <div className="border border-border bg-secondary/20 p-3 space-y-2">
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Biblioteca Global
+                  </p>
+                  <div className="grid gap-2">
+                    {libraryItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border border-border bg-card px-3 py-2"
+                      >
+                        <div>
+                          <p className="text-xs text-foreground">{item.title}</p>
+                          <p className="text-[10px] text-[#6b7a5f] break-all">{item.url}</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            if (newContentType === "material") {
+                              applyLibraryToMaterial(item)
+                            } else {
+                              addLibraryAttachmentToLesson(item)
+                            }
+                          }}
+                          className="border-border rounded-none text-xs"
+                        >
+                          {newContentType === "material" ? "Aplicar" : "Anexar"}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {newContentType === "material" && (
+                <p className="text-xs text-[#6b7a5f]">
+                  Informe ao menos um PDF ou link de leitura. O vídeo é opcional.
+                </p>
+              )}
+
+              {newContentType === "activity" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Target className="h-4 w-4 text-[#F4511E]" />
+                    <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                      Construtor de Questões
+                    </h3>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                      Quantidade sorteada para o aluno
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={newActivityDrawCount}
+                      onChange={(e) => setNewActivityDrawCount(Number(e.target.value))}
+                      className="border-border bg-secondary rounded-none"
+                    />
+                    <p className="text-xs text-[#6b7a5f] mt-2">
+                      O banco precisa ter ao menos {newActivityDrawCount} questões.
+                    </p>
+                  </div>
+                  {renderQuestionBuilder(newQuestions, setNewQuestions)}
+                  {newQuestions.length < newActivityDrawCount && (
+                    <p className="text-xs text-red-500">
+                      Adicione mais questões para atingir o minimo configurado.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowAddContentModal(false)
+                  setSelectedModuleId(null)
+                }}
+                className="flex-1 border-border rounded-none"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAddContent}
+                disabled={!isContentValid}
+                className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
+              >
+                Adicionar Conteúdo
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Final Exam Modal */}
+      {showFinalExamModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-card border border-border w-full max-w-2xl max-h-[calc(100vh-2rem)] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <Award className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Exame Final</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Configurar prova de certificação
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowFinalExamModal(false)}
+                className="text-[#6b7a5f] hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 min-h-0 overflow-y-auto">
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Título do Exame *
+                </label>
+                <Input
+                  placeholder="Ex: Exame Final de Certificação"
+                  value={newFinalExam.title}
+                  onChange={(e) => setNewFinalExam({ ...newFinalExam, title: e.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Nota de Corte (%)
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={newFinalExam.cutScore}
+                    onChange={(e) =>
+                      setNewFinalExam({
+                        ...newFinalExam,
+                        cutScore: Number(e.target.value)
+                      })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Timer HUD (minutos)
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={newFinalExam.durationMinutes}
+                    onChange={(e) =>
+                      setNewFinalExam({
+                        ...newFinalExam,
+                        durationMinutes: Number(e.target.value)
+                      })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Quantidade sorteada para o aluno
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={newFinalExam.drawCount}
+                    onChange={(e) =>
+                      setNewFinalExam({
+                        ...newFinalExam,
+                        drawCount: Number(e.target.value)
+                      })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                  <p className="text-xs text-[#6b7a5f] mt-2">
+                    O banco precisa ter ao menos {newFinalExam.drawCount} questões.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-[#F4511E]" />
+                  <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                    Questões do Exame
+                  </h3>
+                </div>
+                {renderQuestionBuilder(finalExamQuestions, setFinalExamQuestions)}
+                {finalExamQuestions.length < newFinalExam.drawCount && (
+                  <p className="text-xs text-red-500">
+                    Adicione mais questões para atingir o minimo configurado.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => setShowFinalExamModal(false)}
+                className="flex-1 border-border rounded-none"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSaveFinalExam}
+                disabled={!isFinalExamValid}
+                className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
+              >
+                Salvar Exame
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
