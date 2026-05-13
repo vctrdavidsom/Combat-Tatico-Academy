@@ -174,7 +174,7 @@ type CombatState = {
 
 type CombatContextValue = CombatState & {
   currentUser: Student | null
-  cadastrarAluno: (data: Omit<Student, "id" | "auditLog" | "courses" | "documents"> & { courses?: Record<number, boolean>; documents?: StudentDocument[] }) => void
+  cadastrarAluno: (data: Omit<Student, "id" | "auditLog" | "courses" | "documents" | "notifications" | "acknowledgedBroadcasts"> & { courses?: Record<number, boolean>; documents?: StudentDocument[] }) => void
   login: (credenciais: { email: string; password: string }) => { ok: boolean; role: "admin" | "aluno" | null }
   logout: () => void
   criarCurso: (payload: {
