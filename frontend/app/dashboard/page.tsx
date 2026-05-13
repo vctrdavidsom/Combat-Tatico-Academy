@@ -1,271 +1,692 @@
 "use client"
 
-import { useState } from "react"
-import { 
-  Shield, 
-  BookOpen, 
-  Play, 
-  CheckCircle2, 
-  Clock, 
-  ChevronRight,
-  Target,
-  Award,
-  Users
-} from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import {
+  BookOpen,
+  ClipboardList,
+  FileText,
+  LogOut,
+  Shield,
+  Target,
+  UploadCloud,
+  User,
+  CheckCircle2,
+  XCircle,
+  KeyRound,
+  ChevronRight,
+  CircleDot
+} from "lucide-react"
 import { Header } from "@/components/header"
-import { initialBroadcasts } from "@/lib/admin-broadcasts"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  useCombatContext,
+  type Question,
+  type StudentDocument
+} from "@/contexts/CombatContext"
 
-const courses = [
-  {
-    id: 1,
-    title: "Táticas de Combate Próximo",
-    code: "CQC-001",
-    progress: 45,
-    modules: 8,
-    completedModules: 4,
-    status: "em_andamento",
-    instructor: "Cap. Silva",
-    thumbnail: "combat"
-  },
-  {
-    id: 2,
-    title: "Supervisor em Segurança Privada",
-    code: "SSP-002",
-    progress: 100,
-    modules: 12,
-    completedModules: 12,
-    status: "concluido",
-    instructor: "Ten. Oliveira",
-    thumbnail: "security"
-  },
-  {
-    id: 3,
-    title: "Instrução de Armeiro",
-    code: "ARM-003",
-    progress: 0,
-    modules: 10,
-    completedModules: 0,
-    status: "bloqueado",
-    instructor: "Sgt. Costa",
-    thumbnail: "weapons"
-  }
-]
+type SectionKey = "cursos" | "dados" | "atividades" | "notas"
 
-const stats = [
-  { label: "Horas de Treino", value: "42h", icon: Clock },
-  { label: "Módulos Concluídos", value: "16", icon: CheckCircle2 },
-  { label: "Certificações", value: "1", icon: Award },
-  { label: "Ranking", value: "#23", icon: Target }
-]
+type AttemptContext = {
+  courseName: string
+  moduleName?: string
+  activityName: string
+  questions: Question[]
+}
+
+type ObjectiveScore = {
+  correct: number
+  total: number
+  partialPoints: number
+  totalPoints: number
+}
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState("cursos")
-  const notices = initialBroadcasts
+  const router = useRouter()
+  const {
+    listaCursos,
+    tentativasExames,
+    quadroAvisos,
+    currentUser,
+    logout,
+    adicionarDocumentoAluno,
+    alterarSenhaAluno,
+    marcarAvisoCiente
+  } = useCombatContext()
+
+  const searchParams = useSearchParams()
+  const [activeSection, setActiveSection] = useState<SectionKey>("cursos")
+  const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [passwordMessage, setPasswordMessage] = useState("")
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const availableCourses = useMemo(() => {
+    if (!currentUser) return []
+    return listaCursos.filter((course) => currentUser.courses?.[course.id])
+  }, [listaCursos, currentUser])
+
+  const studentAttempts = useMemo(() => {
+    if (!currentUser) return []
+    return tentativasExames.filter((attempt) => attempt.alunoId === currentUser.id)
+  }, [tentativasExames, currentUser])
+
+  useEffect(() => {
+    const sectionParam = searchParams.get("section") as SectionKey | null
+    if (sectionParam && ["cursos", "dados", "atividades", "notas"].includes(sectionParam)) {
+      setActiveSection(sectionParam)
+    }
+    const attemptParam = Number(searchParams.get("attemptId"))
+    if (sectionParam === "atividades" && attemptParam) {
+      const exists = studentAttempts.find((attempt) => attempt.id === attemptParam)
+      if (exists) {
+        setSelectedAttemptId(attemptParam)
+      }
+    }
+  }, [searchParams, studentAttempts])
+
+  useEffect(() => {
+    if (!studentAttempts.length) return
+    if (!selectedAttemptId || !studentAttempts.find((a) => a.id === selectedAttemptId)) {
+      setSelectedAttemptId(studentAttempts[0].id)
+    }
+  }, [studentAttempts, selectedAttemptId])
+
+  const pendingCriticalNotice = useMemo(() => {
+    if (!currentUser) return null
+    const acknowledged = currentUser.acknowledgedBroadcasts ?? []
+    return (
+      quadroAvisos.find(
+        (notice) => notice.priority === "critico" && !acknowledged.includes(notice.id)
+      ) || null
+    )
+  }, [quadroAvisos, currentUser])
+
+  const selectedAttempt = useMemo(() => {
+    if (!selectedAttemptId) return null
+    return studentAttempts.find((attempt) => attempt.id === selectedAttemptId) || null
+  }, [studentAttempts, selectedAttemptId])
+
+  const selectedAttemptContext = useMemo((): AttemptContext | null => {
+    if (!selectedAttempt) return null
+    const course = listaCursos.find((item) => item.id === selectedAttempt.courseId)
+    if (!course) return null
+
+    if (selectedAttempt.type === "exame") {
+      return {
+        courseName: course.name,
+        activityName: course.finalExam?.title || selectedAttempt.title,
+        questions: course.finalExam?.questions || []
+      }
+    }
+
+    const module = course.modules.find(
+      (item) => item.id === selectedAttempt.moduleId || item.items.some((i) => i.id === selectedAttempt.contentId)
+    )
+    const item = module?.items.find((i) => i.id === selectedAttempt.contentId && i.type === "activity")
+
+    return {
+      courseName: course.name,
+      moduleName: module?.name,
+      activityName: item?.title || selectedAttempt.title,
+      questions: item?.questions || []
+    }
+  }, [selectedAttempt, listaCursos])
+
+  const sumQuestionPoints = (questions: Question[]) =>
+    Number(
+      questions.reduce((sum, question) => sum + (question.weight ?? 1), 0).toFixed(2)
+    )
+
+  const sumObjectivePoints = (questions: Question[], answers: Record<number, string | number>) => {
+    let correct = 0
+    let total = 0
+    let points = 0
+    questions.forEach((question) => {
+      if (question.type !== "multiple") return
+      const weight = question.weight ?? 1
+      total += 1
+      if (answers[question.id] === question.correctIndex) {
+        correct += 1
+        points += weight
+      }
+    })
+    return { correct, total, points: Number(points.toFixed(2)) }
+  }
+
+  const objectiveScore = useMemo((): ObjectiveScore | null => {
+    if (!selectedAttemptContext || !selectedAttempt) return null
+    const totals = sumObjectivePoints(selectedAttemptContext.questions, selectedAttempt.answers)
+    const totalPoints = selectedAttempt.totalPoints ?? sumQuestionPoints(selectedAttemptContext.questions)
+    return {
+      correct: totals.correct,
+      total: totals.total,
+      partialPoints: totals.points,
+      totalPoints
+    }
+  }, [selectedAttemptContext, selectedAttempt])
+
+  const finalPoints = useMemo(() => {
+    if (!selectedAttempt) return null
+    const total = selectedAttempt.totalPoints
+    if (!total) return null
+    if (typeof selectedAttempt.scorePoints === "number") {
+      return Number(selectedAttempt.scorePoints.toFixed(1))
+    }
+    return Number(((selectedAttempt.scorePercent / 100) * total).toFixed(1))
+  }, [selectedAttempt])
+
+  const gradebook = useMemo(() => {
+    if (!currentUser) return []
+
+    return availableCourses.map((course) => ({
+      course,
+      modules: course.modules.map((module) => {
+        const activities = module.items.filter((item) => item.type === "activity")
+        const rows = activities.map((item) => {
+          const questions = item.questions || []
+          const totalPoints = item.totalPoints ?? sumQuestionPoints(questions)
+          const attempts = studentAttempts.filter(
+            (attempt) => attempt.courseId === course.id && attempt.contentId === item.id && attempt.type === "atividade"
+          )
+          const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
+          let earnedPoints = 0
+          let statusLabel = "Sem envio"
+
+          if (lastAttempt) {
+            if (lastAttempt.status === "corrigido") {
+              if (typeof lastAttempt.scorePoints === "number") {
+                earnedPoints = Number(lastAttempt.scorePoints.toFixed(1))
+              } else {
+                earnedPoints = Number(((lastAttempt.scorePercent / 100) * totalPoints).toFixed(1))
+              }
+              statusLabel = lastAttempt.result === "apto" ? "Apto" : "Reprovado"
+            } else {
+              const partial = sumObjectivePoints(questions, lastAttempt.answers)
+              earnedPoints = Number(partial.points.toFixed(1))
+              statusLabel = "Pendente"
+            }
+          }
+
+          return {
+            id: item.id,
+            title: item.title,
+            earnedPoints,
+            totalPoints,
+            statusLabel
+          }
+        })
+
+        return {
+          id: module.id,
+          name: module.name,
+          rows
+        }
+      })
+    }))
+  }, [availableCourses, studentAttempts, currentUser])
+
+  const handleLogout = () => {
+    logout()
+    router.push("/")
+  }
+
+  const handlePasswordChange = () => {
+    setPasswordMessage("")
+    if (!currentUser) return
+    if (newPassword.length < 6) {
+      setPasswordMessage("A senha deve ter no minimo 6 caracteres.")
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage("As senhas nao coincidem.")
+      return
+    }
+    alterarSenhaAluno(currentUser.id, newPassword)
+    setNewPassword("")
+    setConfirmPassword("")
+    setPasswordMessage("Senha atualizada com sucesso.")
+  }
+
+  const handleDocumentUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !currentUser) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return
+      const kind = file.type.startsWith("image/") ? "image" : "pdf"
+      adicionarDocumentoAluno(currentUser.id, {
+        name: file.name,
+        kind,
+        dataUrl: reader.result
+      })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <p className="text-sm text-[#6b7a5f]">Acesso nao autorizado.</p>
+      </div>
+    )
+  }
+
+  const documents = currentUser.documents || []
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Operador Delta" />
-
-      <main className="p-4 sm:p-6">
-        {/* Broadcast */}
-        <div className="border border-border bg-card p-4 mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
-              Avisos Gerais
-            </h2>
-            <span className="text-xs text-[#6b7a5f]">{notices.length} ativos</span>
-          </div>
-          <div className="space-y-3">
-            {notices.map((notice) => (
-              <div key={notice.id} className="border border-border bg-secondary/30 p-3">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm text-foreground font-bold">{notice.title}</p>
-                  <span className="text-xs text-[#F4511E] uppercase tracking-wider">
-                    {notice.priority}
-                  </span>
-                </div>
-                <p className="text-xs text-[#6b7a5f]">{notice.message}</p>
-                <p className="text-[10px] text-[#6b7a5f] mt-1">
-                  {notice.createdAt} • {notice.author}
-                </p>
-              </div>
-            ))}
+    <div className="min-h-screen bg-black text-white">
+      <aside className="w-full border-b border-[#F4511E] bg-black md:fixed md:inset-y-0 md:left-0 md:w-64 md:border-b-0 md:border-r">
+        <div className="p-4 border-b border-[#F4511E]/30">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+              <Shield className="h-5 w-5 text-[#F4511E]" />
+            </div>
+            <div>
+              <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Aluno</p>
+              <p className="font-bold text-foreground truncate">{currentUser.name}</p>
+            </div>
           </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {stats.map((stat) => (
-            <div key={stat.label} className="border border-border bg-card p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center border border-[#6b7a5f] bg-[#6b7a5f]/10">
-                  <stat.icon className="h-5 w-5 text-[#6b7a5f]" />
-                </div>
+        <nav className="p-4 space-y-2">
+          {(
+            [
+              { key: "cursos", label: "Cursos", icon: BookOpen },
+              { key: "dados", label: "Meus Dados", icon: User },
+              { key: "atividades", label: "Atividades", icon: ClipboardList },
+              { key: "notas", label: "Notas", icon: FileText }
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.key}
+              onClick={() => setActiveSection(item.key)}
+              className={`flex w-full items-center gap-3 border px-3 py-2 text-left text-xs uppercase tracking-wider transition-colors ${
+                activeSection === item.key
+                  ? "border-[#F4511E] bg-[#F4511E]/10 text-[#F4511E]"
+                  : "border-border text-[#6b7a5f] hover:border-[#F4511E]/60 hover:text-white"
+              }`}
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="p-4 border-t border-[#F4511E]/30">
+          <button
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 border border-[#6b7a5f] px-3 py-2 text-xs uppercase tracking-wider text-[#6b7a5f] hover:border-[#F4511E] hover:text-[#F4511E]"
+          >
+            <LogOut className="h-4 w-4" />
+            Sair
+          </button>
+        </div>
+      </aside>
+
+      <div className="md:pl-64">
+        <Header userName={currentUser.name} />
+
+        <main className="p-4 md:p-6 space-y-6">
+          {pendingCriticalNotice && currentUser && (
+            <div className="sticky top-0 z-40 border border-[#F4511E] bg-[#F4511E]/10 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{stat.value}</p>
-                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{stat.label}</p>
+                  <p className="text-xs uppercase tracking-wider text-[#F4511E]">Alerta Critico</p>
+                  <p className="text-sm font-bold text-foreground">{pendingCriticalNotice.title}</p>
+                  <p className="text-xs text-[#6b7a5f]">{pendingCriticalNotice.message}</p>
                 </div>
+                <Button
+                  onClick={() => marcarAvisoCiente(currentUser.id, pendingCriticalNotice.id)}
+                  className="bg-[#F4511E] text-black rounded-none"
+                >
+                  Ciente
+                </Button>
               </div>
             </div>
-          ))}
-        </div>
+          )}
+          {activeSection === "cursos" && (
+            <section className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-bold text-foreground">Cursos Liberados</h1>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Grid de cursos ativos para o operador
+                  </p>
+                </div>
+              </div>
 
-        {/* Tabs */}
-        <div className="flex flex-wrap gap-2 mb-6 border-b border-border sm:gap-4">
-          <button
-            onClick={() => setActiveTab("cursos")}
-            className={`pb-3 text-xs uppercase tracking-wider transition-colors sm:text-sm ${
-              activeTab === "cursos"
-                ? "text-[#F4511E] border-b-2 border-[#F4511E]"
-                : "text-[#6b7a5f] hover:text-foreground"
-            }`}
-          >
-            Meus Cursos
-          </button>
-          <button
-            onClick={() => setActiveTab("certificados")}
-            className={`pb-3 text-xs uppercase tracking-wider transition-colors sm:text-sm ${
-              activeTab === "certificados"
-                ? "text-[#F4511E] border-b-2 border-[#F4511E]"
-                : "text-[#6b7a5f] hover:text-foreground"
-            }`}
-          >
-            Certificados
-          </button>
-        </div>
+              {availableCourses.length === 0 ? (
+                <div className="border border-border bg-[#0a0a0a] p-6 text-sm text-[#6b7a5f]">
+                  Nenhum curso liberado no momento.
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {availableCourses.map((course) => (
+                    <div key={course.id} className="border border-border bg-[#0a0a0a]">
+                      <div className="border-b border-border p-4">
+                        <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{course.code}</p>
+                        <h3 className="text-lg font-bold text-foreground">{course.name}</h3>
+                        <p className="text-xs text-[#6b7a5f] mt-2">{course.totalHours}</p>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center justify-between text-xs text-[#6b7a5f]">
+                          <span>{course.modules.length} modulos</span>
+                          <span className="font-mono">ID {String(course.id).padStart(3, "0")}</span>
+                        </div>
+                        <Link
+                          href={`/curso/${course.id}`}
+                          className="flex items-center justify-between border border-[#F4511E] px-3 py-2 text-xs uppercase tracking-wider text-[#F4511E] hover:bg-[#F4511E] hover:text-black transition-colors"
+                        >
+                          Acessar curso
+                          <ChevronRight className="h-4 w-4" />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
-        {/* Courses Grid */}
-        {activeTab === "cursos" && (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {courses.map((course) => (
-              <CourseCard key={course.id} course={course} />
-            ))}
-          </div>
-        )}
+          {activeSection === "dados" && (
+            <section className="space-y-6">
+              <div>
+                <h1 className="text-xl font-bold text-foreground">Meus Dados</h1>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Perfil e documentos do operador</p>
+              </div>
 
-        {activeTab === "certificados" && (
-          <div className="border border-border bg-card p-8 text-center">
-            <Award className="h-12 w-12 text-[#F4511E] mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-foreground mb-2">
-              Supervisor em Segurança Privada
-            </h3>
-            <p className="text-sm text-[#6b7a5f] mb-4">
-              Certificado emitido em 15/03/2024
-            </p>
-            <button className="text-sm text-[#F4511E] uppercase tracking-wider hover:underline">
-              Baixar Certificado PDF
-            </button>
-          </div>
-        )}
-      </main>
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="border border-border bg-[#0a0a0a] p-4 space-y-4">
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Dados Cadastrais</h2>
+                  <div className="space-y-3 text-sm">
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Nome</p>
+                      <p className="text-foreground">{currentUser.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">CPF</p>
+                      <p className="text-foreground font-mono">{currentUser.cpf || "Nao informado"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Matricula</p>
+                      <p className="text-foreground font-mono">{currentUser.matricula || "Nao informado"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Email</p>
+                      <p className="text-foreground">{currentUser.email}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border border-border bg-[#0a0a0a] p-4 space-y-4">
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Upload de Documentos</h2>
+                  <div className="space-y-3">
+                    {documents.length === 0 ? (
+                      <p className="text-xs text-[#6b7a5f]">Nenhum documento enviado.</p>
+                    ) : (
+                      documents.map((doc) => (
+                        <DocumentRow key={doc.id} document={doc} />
+                      ))
+                    )}
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={handleDocumentUpload}
+                  />
+                  <Button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full bg-[#F4511E] text-black rounded-none"
+                  >
+                    <UploadCloud className="h-4 w-4 mr-2" />
+                    Enviar Documento
+                  </Button>
+                </div>
+              </div>
+
+              <div className="border border-border bg-[#0a0a0a] p-4 space-y-4">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Seguranca</h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Input
+                    type="password"
+                    placeholder="Nova senha"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="border-border bg-black rounded-none text-sm"
+                  />
+                  <Input
+                    type="password"
+                    placeholder="Confirmar senha"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="border-border bg-black rounded-none text-sm"
+                  />
+                </div>
+                {passwordMessage && (
+                  <p className="text-xs text-[#F4511E]">{passwordMessage}</p>
+                )}
+                <Button
+                  onClick={handlePasswordChange}
+                  className="bg-[#F4511E] text-black rounded-none"
+                >
+                  <KeyRound className="h-4 w-4 mr-2" />
+                  Alterar senha
+                </Button>
+              </div>
+            </section>
+          )}
+
+          {activeSection === "atividades" && (
+            <section className="space-y-6">
+              <div>
+                <h1 className="text-xl font-bold text-foreground">Atividades</h1>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                  Historico de execucoes e revisao detalhada
+                </p>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
+                <div className="border border-border bg-[#0a0a0a]">
+                  <div className="p-3 border-b border-border text-xs uppercase tracking-wider text-[#6b7a5f]">
+                    Execucoes
+                  </div>
+                  <div className="divide-y divide-border">
+                    {studentAttempts.length === 0 ? (
+                      <div className="p-4 text-xs text-[#6b7a5f]">Nenhuma atividade enviada.</div>
+                    ) : (
+                      studentAttempts.map((attempt) => (
+                        <button
+                          key={attempt.id}
+                          onClick={() => setSelectedAttemptId(attempt.id)}
+                          className={`w-full text-left p-3 transition-colors ${
+                            selectedAttemptId === attempt.id
+                              ? "bg-[#F4511E]/10 border-l-2 border-[#F4511E]"
+                              : "hover:bg-[#111111]"
+                          }`}
+                        >
+                          <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{attempt.type}</p>
+                          <p className="text-sm text-foreground font-medium">{attempt.title}</p>
+                          <p className="text-[10px] text-[#6b7a5f]">{attempt.submittedAt}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="border border-border bg-[#0a0a0a] p-4 space-y-4">
+                  {!selectedAttempt || !selectedAttemptContext ? (
+                    <p className="text-xs text-[#6b7a5f]">Selecione uma atividade para revisar.</p>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-2 border-b border-border pb-4">
+                        <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{selectedAttemptContext.courseName}</p>
+                        <h2 className="text-lg font-bold text-foreground">{selectedAttemptContext.activityName}</h2>
+                        {objectiveScore && (
+                          <div className="flex flex-wrap items-center gap-3 text-xs">
+                            <div className="flex items-center gap-2 text-[#6b7a5f]">
+                              <Target className="h-4 w-4 text-[#F4511E]" />
+                              Acertos: {objectiveScore.correct}/{objectiveScore.total}
+                            </div>
+                            {selectedAttempt.hasEssay && selectedAttempt.status === "pendente" && (
+                              <span className="text-[#F4511E] font-mono">
+                                Parcial: {objectiveScore.partialPoints.toFixed(1)} / {objectiveScore.totalPoints.toFixed(1)}
+                              </span>
+                            )}
+                            {selectedAttempt.status === "corrigido" && (
+                              <span className="text-green-400 font-mono">
+                                Nota final: {finalPoints?.toFixed(1) ?? "0.0"} / {objectiveScore.totalPoints.toFixed(1)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-4">
+                        {selectedAttemptContext.questions.map((question) => (
+                          <div key={question.id} className="border border-border p-3">
+                            <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-[#6b7a5f]">
+                              <CircleDot className="h-3 w-3" />
+                              Questao {question.id}
+                            </div>
+                            <p className="text-sm text-foreground mt-2">{question.prompt}</p>
+
+                            {question.type === "multiple" ? (
+                              <div className="mt-3 space-y-2">
+                                {question.options?.map((option, index) => {
+                                  const selected = selectedAttempt.answers[question.id] === index
+                                  const correct = question.correctIndex === index
+                                  const stateClass = selected
+                                    ? correct
+                                      ? "border-green-500 text-green-400"
+                                      : "border-red-500 text-red-400"
+                                    : correct
+                                      ? "border-green-500 text-green-400"
+                                      : "border-border text-[#6b7a5f]"
+                                  return (
+                                    <div key={index} className={`border px-3 py-2 text-xs ${stateClass}`}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-mono">{String(index + 1).padStart(2, "0")}</span>
+                                        <span>{option}</span>
+                                        {selected && (
+                                          <span className="ml-auto text-[10px] uppercase">Marcada</span>
+                                        )}
+                                        {correct && !selected && (
+                                          <span className="ml-auto text-[10px] uppercase">Correta</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <div className="mt-3 border border-border p-3 text-xs text-[#6b7a5f]">
+                                <p className="text-[10px] uppercase tracking-wider">Resposta dissertativa</p>
+                                <p className="text-foreground mt-2">
+                                  {String(selectedAttempt.answers[question.id] || "Sem resposta")}
+                                </p>
+                                {selectedAttempt.status === "pendente" && (
+                                  <span className="text-[#F4511E] text-[10px] uppercase tracking-wider">
+                                    Aguardando correcao do administrador
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeSection === "notas" && (
+            <section className="space-y-6">
+              <div>
+                <h1 className="text-xl font-bold text-foreground">Notas</h1>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Boletim por modulos</p>
+              </div>
+
+              {gradebook.length === 0 ? (
+                <div className="border border-border bg-[#0a0a0a] p-6 text-xs text-[#6b7a5f]">
+                  Nenhum dado de notas disponivel.
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {gradebook.map((entry) => (
+                    <div key={entry.course.id} className="border border-border bg-[#0a0a0a]">
+                      <div className="border-b border-border p-4">
+                        <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{entry.course.code}</p>
+                        <h2 className="text-lg font-bold text-foreground">{entry.course.name}</h2>
+                      </div>
+
+                      <div className="divide-y divide-border">
+                        {entry.modules.map((module) => (
+                          <div key={module.id} className="p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="text-sm font-bold text-foreground">{module.name}</h3>
+                              <span className="text-[10px] text-[#6b7a5f] uppercase tracking-wider font-mono">
+                                MOD-{String(module.id).padStart(2, "0")}
+                              </span>
+                            </div>
+                            {module.rows.length === 0 ? (
+                              <p className="text-xs text-[#6b7a5f]">Sem atividades cadastradas.</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {module.rows.map((row) => (
+                                  <div key={row.id} className="border border-border p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                    <div>
+                                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{row.statusLabel}</p>
+                                      <p className="text-sm text-foreground">{row.title}</p>
+                                    </div>
+                                    <div className="text-sm font-mono text-[#F4511E]">
+                                      {row.earnedPoints.toFixed(1)} / {row.totalPoints.toFixed(1)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+        </main>
+      </div>
     </div>
   )
 }
 
-function CourseCard({ course }: { course: typeof courses[0] }) {
-  const statusConfig = {
-    em_andamento: { label: "Em Andamento", color: "text-[#F4511E]", bg: "bg-[#F4511E]/10" },
-    concluido: { label: "Concluído", color: "text-green-500", bg: "bg-green-500/10" },
-    bloqueado: { label: "Bloqueado", color: "text-[#6b7a5f]", bg: "bg-[#6b7a5f]/10" }
-  }
-
-  const status = statusConfig[course.status as keyof typeof statusConfig]
+function DocumentRow({ document }: { document: StudentDocument }) {
+  const status = document.status ?? "aguardando"
+  const statusConfig =
+    status === "validado"
+      ? { label: "Validado", color: "text-green-400", icon: CheckCircle2 }
+      : status === "recusado"
+        ? { label: "Recusado", color: "text-red-400", icon: XCircle }
+      : { label: "Aguardando Validacao", color: "text-[#F4511E]", icon: XCircle }
+  const StatusIcon = statusConfig.icon
 
   return (
-    <div className="border border-border bg-card overflow-hidden group">
-      {/* Thumbnail */}
-      <div className="relative h-40 bg-secondary flex items-center justify-center">
-        <div className="absolute inset-0 opacity-20">
-          <div className="w-full h-full" style={{
-            backgroundImage: `repeating-linear-gradient(
-              45deg,
-              transparent,
-              transparent 10px,
-              #F4511E 10px,
-              #F4511E 11px
-            )`
-          }} />
-        </div>
-        <Shield className="h-16 w-16 text-[#6b7a5f]" />
-        {course.status === "em_andamento" && (
-          <Link 
-            href={`/curso/${course.id}`}
-            className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <div className="flex h-14 w-14 items-center justify-center border-2 border-[#F4511E] bg-[#F4511E]">
-              <Play className="h-6 w-6 text-white fill-white" />
-            </div>
-          </Link>
-        )}
+    <div className="border border-border p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div>
+        <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{document.name}</p>
+        <p className="text-[10px] text-[#6b7a5f]">{document.uploadedAt}</p>
       </div>
-
-      {/* Content */}
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="min-w-0">
-            <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-1">
-              {course.code}
-            </p>
-            <h3 className="font-bold text-foreground leading-tight break-words">
-              {course.title}
-            </h3>
-          </div>
-          <span className={`text-xs px-2 py-1 uppercase tracking-wider ${status.color} ${status.bg}`}>
-            {status.label}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-[#6b7a5f] mb-4">
-          <Users className="h-3 w-3" />
-          <span>{course.instructor}</span>
-        </div>
-
-        {/* Progress */}
-        {course.status !== "bloqueado" && (
-          <div className="mb-4">
-            <div className="flex justify-between text-xs mb-2">
-              <span className="text-[#6b7a5f]">Progresso</span>
-              <span className="text-foreground">{course.progress}%</span>
-            </div>
-            <div className="h-1 bg-secondary">
-              <div 
-                className="h-full bg-[#F4511E] transition-all"
-                style={{ width: `${course.progress}%` }}
-              />
-            </div>
-            <p className="text-xs text-[#6b7a5f] mt-2">
-              {course.completedModules}/{course.modules} módulos
-            </p>
-          </div>
-        )}
-
-        {/* Action */}
-        {course.status === "em_andamento" && (
-          <Link 
-            href={`/curso/${course.id}`}
-            className="flex items-center justify-between w-full p-3 border border-[#F4511E] text-[#F4511E] hover:bg-[#F4511E] hover:text-white transition-colors"
-          >
-            <span className="text-sm uppercase tracking-wider">Continuar</span>
-            <ChevronRight className="h-4 w-4" />
-          </Link>
-        )}
-
-        {course.status === "concluido" && (
-          <Link 
-            href={`/curso/${course.id}`}
-            className="flex items-center justify-between w-full p-3 border border-[#6b7a5f] text-[#6b7a5f] hover:bg-[#6b7a5f] hover:text-white transition-colors"
-          >
-            <span className="text-sm uppercase tracking-wider">Revisar</span>
-            <BookOpen className="h-4 w-4" />
-          </Link>
-        )}
-
-        {course.status === "bloqueado" && (
-          <div className="p-3 border border-border text-center text-[#6b7a5f] text-sm">
-            Aguardando Liberação
-          </div>
-        )}
+      <div className={`flex items-center gap-2 text-xs uppercase tracking-wider ${statusConfig.color}`}>
+        <StatusIcon className="h-4 w-4" />
+        {statusConfig.label}
       </div>
     </div>
   )

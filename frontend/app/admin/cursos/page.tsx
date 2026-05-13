@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { 
   BookOpen, 
@@ -14,66 +14,10 @@ import {
   Users,
   Layers
 } from "lucide-react"
-import { Header } from "@/components/header"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/admin/rich-text-editor"
-
-interface Course {
-  id: number
-  code: string
-  name: string
-  description: string
-  thumbnail: string
-  totalHours: string
-  modulesCount: number
-  studentsCount: number
-  completionRate: number
-  averageScore: number
-  status: "ativo" | "rascunho"
-}
-
-const initialCourses: Course[] = [
-  {
-    id: 1,
-    code: "CQC-001",
-    name: "Táticas de Combate Próximo",
-    description: "Treinamento avançado em técnicas de combate corpo a corpo e defesa pessoal tática.",
-    thumbnail: "",
-    totalHours: "40h",
-    modulesCount: 8,
-    studentsCount: 4,
-    completionRate: 82,
-    averageScore: 88,
-    status: "ativo"
-  },
-  {
-    id: 2,
-    code: "SSP-002",
-    name: "Supervisor em Segurança Privada",
-    description: "Formação completa para supervisores de equipes de segurança patrimonial e pessoal.",
-    thumbnail: "",
-    totalHours: "60h",
-    modulesCount: 12,
-    studentsCount: 2,
-    completionRate: 74,
-    averageScore: 90,
-    status: "ativo"
-  },
-  {
-    id: 3,
-    code: "ARM-003",
-    name: "Instrução de Armeiro",
-    description: "Curso técnico de manutenção, reparo e customização de armamentos.",
-    thumbnail: "",
-    totalHours: "24h",
-    modulesCount: 10,
-    studentsCount: 1,
-    completionRate: 45,
-    averageScore: 76,
-    status: "rascunho"
-  }
-]
+import { useCombatContext } from "@/contexts/CombatContext"
 
 const stripHtml = (value: string) => {
   return value.replace(/<[^>]*>/g, "").trim()
@@ -81,8 +25,8 @@ const stripHtml = (value: string) => {
 
 export default function AdminCoursesPage() {
   const router = useRouter()
+  const { listaCursos, listaAlunos, tentativasExames, criarCurso } = useCombatContext()
   const [searchQuery, setSearchQuery] = useState("")
-  const [courses, setCourses] = useState<Course[]>(initialCourses)
   const [showAddModal, setShowAddModal] = useState(false)
   const [newCourse, setNewCourse] = useState({
     name: "",
@@ -92,30 +36,43 @@ export default function AdminCoursesPage() {
     totalHours: ""
   })
 
-  const filteredCourses = courses.filter(course =>
-    course.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    course.code.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredCourses = useMemo(() => {
+    const term = searchQuery.toLowerCase()
+    return listaCursos.filter(
+      (course) =>
+        course.name.toLowerCase().includes(term) ||
+        course.code.toLowerCase().includes(term)
+    )
+  }, [listaCursos, searchQuery])
+
+  const getCourseStats = (courseId: number) => {
+    const studentsCount = listaAlunos.filter((student) => student.courses[courseId]).length
+    const completedCount = listaAlunos.filter(
+      (student) =>
+        student.courses[courseId] &&
+        (student.status === "apto" || student.status === "certificado")
+    ).length
+    const attempts = tentativasExames.filter(
+      (attempt) => attempt.courseId === courseId && attempt.status === "corrigido"
+    )
+    const averageScore = attempts.length
+      ? Math.round(attempts.reduce((sum, attempt) => sum + attempt.scorePercent, 0) / attempts.length)
+      : 0
+    const completionRate = studentsCount
+      ? Math.round((completedCount / studentsCount) * 100)
+      : 0
+    return { studentsCount, completionRate, averageScore }
+  }
 
   const handleAddCourse = () => {
     if (newCourse.name && newCourse.code) {
-      const newId = Math.max(...courses.map(c => c.id)) + 1
-      setCourses([
-        ...courses,
-        {
-          id: newId,
-          code: newCourse.code.toUpperCase(),
-          name: newCourse.name,
-          description: newCourse.description,
-          thumbnail: newCourse.thumbnail,
-          totalHours: newCourse.totalHours || "0h",
-          modulesCount: 0,
-          studentsCount: 0,
-          completionRate: 0,
-          averageScore: 0,
-          status: "rascunho"
-        }
-      ])
+      criarCurso({
+        code: newCourse.code,
+        name: newCourse.name,
+        description: newCourse.description,
+        thumbnail: newCourse.thumbnail,
+        totalHours: newCourse.totalHours
+      })
       setNewCourse({
         name: "",
         code: "",
@@ -130,10 +87,7 @@ export default function AdminCoursesPage() {
   const isFormValid = newCourse.name && newCourse.code
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Comandante Admin" isAdmin />
-
-      <main className="p-4 md:p-6">
+    <div>
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
@@ -163,6 +117,9 @@ export default function AdminCoursesPage() {
         {/* Courses Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredCourses.map((course) => (
+            (() => {
+              const stats = getCourseStats(course.id)
+              return (
             <div 
               key={course.id} 
               onClick={() => router.push(`/admin/cursos/${course.id}`)}
@@ -219,24 +176,24 @@ export default function AdminCoursesPage() {
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
                       <Layers className="h-3 w-3" />
-                      <span className="text-xs">{course.modulesCount} módulos</span>
+                      <span className="text-xs">{course.modules.length} módulos</span>
                     </div>
                   </div>
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
                       <Users className="h-3 w-3" />
-                      <span className="text-xs">{course.studentsCount} alunos</span>
+                      <span className="text-xs">{stats.studentsCount} alunos</span>
                     </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 pt-3 mt-3 border-t border-border">
                   <div className="text-center">
                     <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Conclusao</p>
-                    <p className="text-sm text-foreground font-bold">{course.completionRate}%</p>
+                    <p className="text-sm text-foreground font-bold">{stats.completionRate}%</p>
                   </div>
                   <div className="text-center">
                     <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Nota media</p>
-                    <p className="text-sm text-foreground font-bold">{course.averageScore}%</p>
+                    <p className="text-sm text-foreground font-bold">{stats.averageScore}%</p>
                   </div>
                 </div>
               </div>
@@ -251,6 +208,8 @@ export default function AdminCoursesPage() {
                 </div>
               </div>
             </div>
+              )
+            })()
           ))}
         </div>
 
@@ -260,8 +219,6 @@ export default function AdminCoursesPage() {
             <p className="text-[#6b7a5f]">Nenhum curso encontrado.</p>
           </div>
         )}
-      </main>
-
       {/* Add Course Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">

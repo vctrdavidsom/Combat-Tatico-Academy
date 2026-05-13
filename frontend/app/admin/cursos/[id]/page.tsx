@@ -1,225 +1,59 @@
 "use client"
 
 import { useState, type Dispatch, type SetStateAction } from "react"
-import { useRouter } from "next/navigation"
-import { 
-  BookOpen, 
+import { useParams, useRouter } from "next/navigation"
+import {
+  BookOpen,
   ArrowLeft,
   Plus,
   X,
   Play,
   FileText,
+  Image as ImageIcon,
   Link as LinkIcon,
   Clock,
   ChevronDown,
   ChevronUp,
   Trash2,
-  GripVertical,
-  Image as ImageIcon,
-  Save,
   Target,
-  Award
+  Award,
+  GripVertical
 } from "lucide-react"
-import { Header } from "@/components/header"
+import {
+  useCombatContext,
+  type Course,
+  type ContentItem,
+  type ContentType,
+  type MaterialAttachment,
+  type Question,
+  type QuestionType
+} from "@/contexts/CombatContext"
+import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
 import { RichTextEditor } from "@/components/admin/rich-text-editor"
-import { initialLibraryItems, type LibraryItem } from "@/lib/admin-library"
+import type { LibraryItem } from "@/lib/admin-library"
 
-type ContentType = "video" | "material" | "activity"
-
-type QuestionType = "multiple" | "essay"
-
-interface Question {
-  id: number
-  type: QuestionType
-  prompt: string
-  options: string[]
-  correctIndex?: number
-}
-
-type MaterialKind = "pdf" | "link" | "file"
-
-interface MaterialAttachment {
-  id: number
-  name: string
-  kind: MaterialKind
-  url: string
-}
-
-interface ContentItem {
-  id: number
-  type: ContentType
-  title: string
-  duration?: string
-  videoId?: string
-  materialPdfUrl?: string
-  materialLinkUrl?: string
-  questions?: Question[]
-  drawCount?: number
-  attemptLimit?: number
-  materials?: MaterialAttachment[]
-}
-
-interface Module {
-  id: number
-  name: string
-  description: string
-  items: ContentItem[]
-  isExpanded: boolean
-}
-
-interface FinalExam {
-  id: number
-  title: string
-  cutScore: number
-  durationMinutes: number
-  questions: Question[]
-  drawCount: number
-  attemptLimit: number
-}
-
-interface CertificateSigner {
+type CertificateSigner = {
   id: number
   name: string
   role: string
 }
 
-interface CertificateConfig {
-  title: string
-  subtitle: string
-  issuer: string
-  sealUrl: string
-  backgroundUrl: string
-  signers: CertificateSigner[]
-  notes: string
-}
-
-interface Course {
-  id: number
-  code: string
-  name: string
-  description: string
-  thumbnail: string
-  totalHours: string
-  status: "ativo" | "rascunho"
-  modules: Module[]
-  finalExam?: FinalExam | null
-  certificateConfig: CertificateConfig
-}
-
-const initialCourse: Course = {
-  id: 1,
-  code: "CQC-001",
-  name: "Táticas de Combate Próximo",
-  description: "<p>Treinamento avancado em tecnicas de combate corpo a corpo e defesa pessoal tatica.</p>",
-  thumbnail: "",
-  totalHours: "40h",
-  status: "ativo",
-  modules: [
-    {
-      id: 1,
-      name: "Módulo 1: Fundamentos",
-      description: "Introdução às técnicas básicas de combate",
-      isExpanded: true,
-      items: [
-        {
-          id: 1,
-          type: "video",
-          title: "Aula 1: Introdução ao Combate Tático",
-          videoId: "jyTUFvYLgUk",
-          duration: "45min"
-        },
-        {
-          id: 2,
-          type: "material",
-          title: "Leitura Guiada: Fundamentos",
-          materialPdfUrl: "#",
-          materialLinkUrl: "#",
-          duration: "20min"
-        },
-        {
-          id: 3,
-          type: "activity",
-          title: "Questionário de Apoio",
-          drawCount: 2,
-          attemptLimit: 2,
-          questions: [
-            {
-              id: 1,
-              type: "multiple",
-              prompt: "Qual é o objetivo principal do controle de distância?",
-              options: ["Imobilização", "Segurança operacional", "Agressão", "Postura teatral"],
-              correctIndex: 1
-            },
-            {
-              id: 2,
-              type: "essay",
-              prompt: "Descreva a postura básica de prontidão em CQC.",
-              options: []
-            }
-          ]
-        }
-      ]
-    },
-    {
-      id: 2,
-      name: "Módulo 2: Técnicas Avançadas",
-      description: "Técnicas avançadas de combate corpo a corpo",
-      isExpanded: false,
-      items: [
-        {
-          id: 4,
-          type: "video",
-          title: "Aula 1: Defesa Pessoal",
-          videoId: "",
-          duration: "50min"
-        }
-      ]
-    }
-  ],
-  finalExam: {
-    id: 1,
-    title: "Exame Final de Certificação",
-    cutScore: 70,
-    durationMinutes: 60,
-    drawCount: 10,
-    attemptLimit: 2,
-    questions: [
-      {
-        id: 1,
-        type: "multiple",
-        prompt: "Qual é o princípio tático base para avanço em ambiente fechado?",
-        options: ["Velocidade", "Silêncio", "Controle de setores", "Imprevisibilidade"],
-        correctIndex: 2
-      }
-    ]
-  },
-  certificateConfig: {
-    title: "Certificado de Conclusao",
-    subtitle: "Combat Tatico Academy",
-    issuer: "Diretoria de Operacoes",
-    sealUrl: "https://example.com/selos/cta-seal.png",
-    backgroundUrl: "https://example.com/certificados/template-dark.png",
-    signers: [
-      { id: 1, name: "Cel. Almeida", role: "Comandante Geral" },
-      { id: 2, name: "Cap. Souza", role: "Instrutor Chefe" }
-    ],
-    notes: "Assinaturas digitais aplicadas automaticamente."
-  }
-}
+type MaterialKind = MaterialAttachment["kind"]
 
 export default function AdminCourseDetailPage() {
   const router = useRouter()
-  const [course, setCourse] = useState<Course>(initialCourse)
+  const params = useParams()
+  const { listaCursos, bibliotecaArquivos, atualizarCurso } = useCombatContext()
+  const courseId = Number(params.id)
+  const course = listaCursos.find((item) => item.id === courseId) || listaCursos[0]
   const [activeTab, setActiveTab] = useState<"conteudo" | "certificado">("conteudo")
   const [showAddModuleModal, setShowAddModuleModal] = useState(false)
   const [showAddContentModal, setShowAddContentModal] = useState(false)
   const [showFinalExamModal, setShowFinalExamModal] = useState(false)
   const [selectedModuleId, setSelectedModuleId] = useState<number | null>(null)
-  const [hasChanges, setHasChanges] = useState(false)
   
   const [newModule, setNewModule] = useState({ name: "", description: "" })
   const [newContentType, setNewContentType] = useState<ContentType>("video")
@@ -232,6 +66,7 @@ export default function AdminCourseDetailPage() {
   })
   const [newActivityDrawCount, setNewActivityDrawCount] = useState(1)
   const [newActivityAttemptLimit, setNewActivityAttemptLimit] = useState(1)
+  const [newActivityTotalPoints, setNewActivityTotalPoints] = useState(2)
   const [newQuestions, setNewQuestions] = useState<Question[]>([])
   const [newMaterials, setNewMaterials] = useState<MaterialAttachment[]>([])
   const [newFinalExam, setNewFinalExam] = useState({
@@ -239,7 +74,8 @@ export default function AdminCourseDetailPage() {
     cutScore: 70,
     durationMinutes: 60,
     drawCount: 10,
-    attemptLimit: 2
+    attemptLimit: 2,
+    totalPoints: 2
   })
   const [finalExamQuestions, setFinalExamQuestions] = useState<Question[]>([])
 
@@ -257,7 +93,8 @@ export default function AdminCourseDetailPage() {
         type: "multiple",
         prompt: "",
         options: ["", ""],
-        correctIndex: 0
+        correctIndex: 0,
+        weight: 1
       }
     ])
   }
@@ -375,14 +212,20 @@ export default function AdminCourseDetailPage() {
     })
     setNewActivityDrawCount(1)
     setNewActivityAttemptLimit(1)
+    setNewActivityTotalPoints(2)
     setNewQuestions([])
     setNewMaterials([])
   }
 
-  const libraryItems = initialLibraryItems
+  const libraryItems = bibliotecaArquivos
+
+  const updateCourse = (updater: (prev: Course) => Course) => {
+    if (!course) return
+    atualizarCurso(updater(course))
+  }
 
   const addSigner = () => {
-    setCourse((prev) => ({
+    updateCourse((prev) => ({
       ...prev,
       certificateConfig: {
         ...prev.certificateConfig,
@@ -396,11 +239,10 @@ export default function AdminCourseDetailPage() {
         ]
       }
     }))
-    setHasChanges(true)
   }
 
   const updateSigner = (signerId: number, patch: Partial<CertificateSigner>) => {
-    setCourse((prev) => ({
+    updateCourse((prev) => ({
       ...prev,
       certificateConfig: {
         ...prev.certificateConfig,
@@ -409,11 +251,10 @@ export default function AdminCourseDetailPage() {
         )
       }
     }))
-    setHasChanges(true)
   }
 
   const removeSigner = (signerId: number) => {
-    setCourse((prev) => ({
+    updateCourse((prev) => ({
       ...prev,
       certificateConfig: {
         ...prev.certificateConfig,
@@ -422,7 +263,6 @@ export default function AdminCourseDetailPage() {
         )
       }
     }))
-    setHasChanges(true)
   }
 
   const applyLibraryToMaterial = (item: LibraryItem) => {
@@ -473,33 +313,34 @@ export default function AdminCourseDetailPage() {
   }
 
   const toggleModule = (moduleId: number) => {
-    setCourse({
-      ...course,
-      modules: course.modules.map(m => 
-        m.id === moduleId ? { ...m, isExpanded: !m.isExpanded } : m
+    updateCourse((prev) => ({
+      ...prev,
+      modules: prev.modules.map((module) =>
+        module.id === moduleId ? { ...module, isExpanded: !module.isExpanded } : module
       )
-    })
+    }))
   }
 
   const handleAddModule = () => {
     if (newModule.name) {
-      const newId = Math.max(0, ...course.modules.map(m => m.id)) + 1
-      setCourse({
-        ...course,
-        modules: [
-          ...course.modules,
-          {
-            id: newId,
-            name: newModule.name,
-            description: newModule.description,
-            items: [],
-            isExpanded: true
-          }
-        ]
+      updateCourse((prev) => {
+        const newId = Math.max(0, ...prev.modules.map((module) => module.id)) + 1
+        return {
+          ...prev,
+          modules: [
+            ...prev.modules,
+            {
+              id: newId,
+              name: newModule.name,
+              description: newModule.description,
+              items: [],
+              isExpanded: true
+            }
+          ]
+        }
       })
       setNewModule({ name: "", description: "" })
       setShowAddModuleModal(false)
-      setHasChanges(true)
     }
   }
 
@@ -508,13 +349,16 @@ export default function AdminCourseDetailPage() {
       return
     }
 
-    if (newContentType === "activity" && newQuestions.length < newActivityDrawCount) {
+    if (
+      newContentType === "activity" &&
+      (newQuestions.length < newActivityDrawCount || newActivityAttemptLimit < 1)
+    ) {
       return
     }
 
-    setCourse({
-      ...course,
-      modules: course.modules.map((module) => {
+    updateCourse((prev) => ({
+      ...prev,
+      modules: prev.modules.map((module) => {
         if (module.id !== selectedModuleId) {
           return module
         }
@@ -548,12 +392,18 @@ export default function AdminCourseDetailPage() {
             materialLinkUrl: newContent.materialLinkUrl
           }
         } else {
+          const normalizedQuestions = normalizeQuestionWeights(
+            newQuestions,
+            newActivityTotalPoints
+          )
           newItem = {
             id: newItemId,
             type: "activity",
             title: newContent.title,
             drawCount: newActivityDrawCount,
-            questions: newQuestions.map((question) => ({
+            attemptLimit: newActivityAttemptLimit,
+            totalPoints: newActivityTotalPoints,
+            questions: normalizedQuestions.map((question) => ({
               ...question,
               options: question.type === "multiple" ? question.options : []
             }))
@@ -565,26 +415,23 @@ export default function AdminCourseDetailPage() {
           items: [...module.items, newItem]
         }
       })
-    })
-
-    setHasChanges(true)
+    }))
     resetNewContent()
     setSelectedModuleId(null)
     setShowAddContentModal(false)
   }
 
   const handleDeleteModule = (moduleId: number) => {
-    setCourse({
-      ...course,
-      modules: course.modules.filter(m => m.id !== moduleId)
-    })
-    setHasChanges(true)
+    updateCourse((prev) => ({
+      ...prev,
+      modules: prev.modules.filter((module) => module.id !== moduleId)
+    }))
   }
 
   const handleDeleteItem = (moduleId: number, itemId: number) => {
-    setCourse({
-      ...course,
-      modules: course.modules.map((module) => {
+    updateCourse((prev) => ({
+      ...prev,
+      modules: prev.modules.map((module) => {
         if (module.id !== moduleId) {
           return module
         }
@@ -594,8 +441,7 @@ export default function AdminCourseDetailPage() {
           items: module.items.filter((item) => item.id !== itemId)
         }
       })
-    })
-    setHasChanges(true)
+    }))
   }
 
   const openAddContentModal = (moduleId: number) => {
@@ -610,7 +456,9 @@ export default function AdminCourseDetailPage() {
         title: course.finalExam.title,
         cutScore: course.finalExam.cutScore,
         durationMinutes: course.finalExam.durationMinutes,
-        drawCount: course.finalExam.drawCount
+        drawCount: course.finalExam.drawCount,
+        attemptLimit: course.finalExam.attemptLimit,
+        totalPoints: course.finalExam.totalPoints ?? 2
       })
       setFinalExamQuestions(course.finalExam.questions)
     } else {
@@ -618,7 +466,9 @@ export default function AdminCourseDetailPage() {
         title: "Exame Final de Certificação",
         cutScore: 70,
         durationMinutes: 60,
-        drawCount: 10
+        drawCount: 10,
+        attemptLimit: 2,
+        totalPoints: 2
       })
       setFinalExamQuestions([])
     }
@@ -630,34 +480,38 @@ export default function AdminCourseDetailPage() {
       return
     }
 
-    if (finalExamQuestions.length < newFinalExam.drawCount) {
+    if (finalExamQuestions.length < newFinalExam.drawCount || newFinalExam.attemptLimit < 1) {
       return
     }
 
-    setCourse({
-      ...course,
+    const normalizedQuestions = normalizeQuestionWeights(
+      finalExamQuestions,
+      newFinalExam.totalPoints
+    )
+    updateCourse((prev) => ({
+      ...prev,
       finalExam: {
-        id: course.finalExam?.id ?? 1,
+        id: prev.finalExam?.id ?? 1,
         title: newFinalExam.title,
         cutScore: newFinalExam.cutScore,
         durationMinutes: newFinalExam.durationMinutes,
         drawCount: newFinalExam.drawCount,
-        questions: finalExamQuestions.map((question) => ({
+        attemptLimit: newFinalExam.attemptLimit,
+        totalPoints: newFinalExam.totalPoints,
+        questions: normalizedQuestions.map((question) => ({
           ...question,
           options: question.type === "multiple" ? question.options : []
         }))
       }
-    })
-    setHasChanges(true)
+    }))
     setShowFinalExamModal(false)
   }
 
   const handleRemoveFinalExam = () => {
-    setCourse({
-      ...course,
+    updateCourse((prev) => ({
+      ...prev,
       finalExam: null
-    })
-    setHasChanges(true)
+    }))
   }
 
   const getContentIcon = (type: ContentType) => {
@@ -686,6 +540,17 @@ export default function AdminCourseDetailPage() {
     }
   }
 
+  const normalizeQuestionWeights = (questions: Question[], totalPoints: number) => {
+    if (!questions.length) return questions
+    const baseWeights = questions.map((question) => question.weight ?? 1)
+    const sumWeights = baseWeights.reduce((sum, weight) => sum + weight, 0) || 1
+    const factor = totalPoints > 0 ? totalPoints / sumWeights : 1
+    return questions.map((question) => ({
+      ...question,
+      weight: Number(((question.weight ?? 1) * factor).toFixed(2))
+    }))
+  }
+
   const totalItems = course.modules.reduce((acc, module) => acc + module.items.length, 0)
   const isContentValid =
     newContent.title &&
@@ -693,10 +558,15 @@ export default function AdminCourseDetailPage() {
       ? Boolean(newContent.videoId)
       : newContentType === "material"
         ? Boolean(newContent.materialPdfUrl || newContent.materialLinkUrl)
-        : newQuestions.length >= newActivityDrawCount && newActivityDrawCount > 0)
+        : newQuestions.length >= newActivityDrawCount &&
+          newActivityDrawCount > 0 &&
+          newActivityAttemptLimit > 0 &&
+          newActivityTotalPoints > 0)
   const isFinalExamValid =
     newFinalExam.title &&
     newFinalExam.drawCount > 0 &&
+    newFinalExam.attemptLimit > 0 &&
+    newFinalExam.totalPoints > 0 &&
     finalExamQuestions.length >= newFinalExam.drawCount
 
   const renderQuestionBuilder = (
@@ -736,6 +606,19 @@ export default function AdminCourseDetailPage() {
                 <option value="multiple">Múltipla</option>
                 <option value="essay">Dissertativa</option>
               </select>
+              <Input
+                type="number"
+                min={0}
+                step="0.1"
+                value={question.weight ?? 1}
+                onChange={(e) =>
+                  updateQuestion(setQuestions, question.id, {
+                    weight: Number(e.target.value)
+                  })
+                }
+                className="w-24 border-border bg-secondary rounded-none text-xs"
+                placeholder="Peso"
+              />
               <button
                 type="button"
                 onClick={() => removeQuestion(setQuestions, question.id)}
@@ -750,25 +633,41 @@ export default function AdminCourseDetailPage() {
           {question.type === "multiple" ? (
             <div className="mt-3 space-y-2">
               {question.options.map((option, optionIndex) => (
-                <div key={optionIndex} className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name={`question-${question.id}`}
-                    checked={question.correctIndex === optionIndex}
-                    onChange={() =>
-                      updateQuestion(setQuestions, question.id, {
-                        correctIndex: optionIndex
-                      })
-                    }
-                    className="h-4 w-4 accent-[#F4511E]"
-                  />
+                <div key={optionIndex} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <label
+                    htmlFor={`question-${question.id}-correct-${optionIndex}`}
+                    className={`flex items-center gap-2 text-[10px] uppercase tracking-wider ${
+                      question.correctIndex === optionIndex
+                        ? "text-[#F4511E]"
+                        : "text-[#6b7a5f]"
+                    }`}
+                    title="Marcar como correta"
+                  >
+                    <input
+                      id={`question-${question.id}-correct-${optionIndex}`}
+                      type="radio"
+                      name={`question-${question.id}`}
+                      checked={question.correctIndex === optionIndex}
+                      onChange={() =>
+                        updateQuestion(setQuestions, question.id, {
+                          correctIndex: optionIndex
+                        })
+                      }
+                      className="h-4 w-4 accent-[#F4511E]"
+                    />
+                    Correta
+                  </label>
                   <Input
                     placeholder={`Alternativa ${optionIndex + 1}`}
                     value={option}
                     onChange={(e) =>
                       updateOption(setQuestions, question.id, optionIndex, e.target.value)
                     }
-                    className="border-border bg-secondary rounded-none"
+                    className={`border-border bg-secondary rounded-none ${
+                      question.correctIndex === optionIndex
+                        ? "border-[#F4511E]"
+                        : ""
+                    }`}
                   />
                   <button
                     type="button"
@@ -809,10 +708,7 @@ export default function AdminCourseDetailPage() {
   )
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Comandante Admin" isAdmin />
-
-      <main className="p-4 md:p-6">
+    <div>
         {/* Back Button */}
         <button
           onClick={() => router.push("/admin/cursos")}
@@ -861,8 +757,10 @@ export default function AdminCourseDetailPage() {
                   <Switch 
                     checked={course.status === "ativo"}
                     onCheckedChange={(checked) => {
-                      setCourse({ ...course, status: checked ? "ativo" : "rascunho" })
-                      setHasChanges(true)
+                      updateCourse((prev) => ({
+                        ...prev,
+                        status: checked ? "ativo" : "rascunho"
+                      }))
                     }}
                   />
                 </div>
@@ -920,8 +818,7 @@ export default function AdminCourseDetailPage() {
                 label="Manual tatico"
                 value={course.description}
                 onChange={(value) => {
-                  setCourse((prev) => ({ ...prev, description: value }))
-                  setHasChanges(true)
+                  updateCourse((prev) => ({ ...prev, description: value }))
                 }}
                 placeholder="Descreva o manual tatico completo do curso..."
               />
@@ -1074,7 +971,13 @@ export default function AdminCourseDetailPage() {
                                   Banco: {item.questions?.length ?? 0} perguntas
                                 </span>
                                 <span className="uppercase tracking-wider">
+                                  Pontos: {item.totalPoints ?? 0}
+                                </span>
+                                <span className="uppercase tracking-wider">
                                   Sorteio: {item.drawCount ?? 0}
+                                </span>
+                                <span className="uppercase tracking-wider">
+                                  Tentativas: {item.attemptLimit ?? 0}
                                 </span>
                                 <span className="uppercase tracking-wider">Questionário de apoio</span>
                               </div>
@@ -1125,8 +1028,8 @@ export default function AdminCourseDetailPage() {
 
             {/* Final Exam Section */}
             <div className="border border-border bg-card mt-8">
-          <div className="p-4 border-b border-border flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-3">
+          <div className="p-4 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3 min-w-0">
               <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
                 <Award className="h-5 w-5 text-[#F4511E]" />
               </div>
@@ -1137,7 +1040,7 @@ export default function AdminCourseDetailPage() {
                 </p>
               </div>
             </div>
-            <div className="flex flex-col gap-2 w-full sm:flex-row sm:w-auto">
+            <div className="flex flex-col gap-2 w-full sm:flex-row sm:items-center sm:justify-end sm:w-auto sm:ml-auto">
               {course.finalExam && (
                 <Button
                   variant="outline"
@@ -1174,6 +1077,14 @@ export default function AdminCourseDetailPage() {
                 <span className="flex items-center gap-2">
                   <Target className="h-4 w-4" />
                   Sorteio: {course.finalExam.drawCount}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  Tentativas: {course.finalExam.attemptLimit}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  Pontos: {course.finalExam.totalPoints ?? 0}
                 </span>
               </div>
               <p className="text-xs text-[#6b7a5f] mt-3">
@@ -1214,14 +1125,13 @@ export default function AdminCourseDetailPage() {
                   <Input
                     value={course.certificateConfig.title}
                     onChange={(e) => {
-                      setCourse((prev) => ({
+                      updateCourse((prev) => ({
                         ...prev,
                         certificateConfig: {
                           ...prev.certificateConfig,
                           title: e.target.value
                         }
                       }))
-                      setHasChanges(true)
                     }}
                     className="border-border bg-secondary rounded-none"
                   />
@@ -1233,14 +1143,13 @@ export default function AdminCourseDetailPage() {
                   <Input
                     value={course.certificateConfig.subtitle}
                     onChange={(e) => {
-                      setCourse((prev) => ({
+                      updateCourse((prev) => ({
                         ...prev,
                         certificateConfig: {
                           ...prev.certificateConfig,
                           subtitle: e.target.value
                         }
                       }))
-                      setHasChanges(true)
                     }}
                     className="border-border bg-secondary rounded-none"
                   />
@@ -1252,14 +1161,13 @@ export default function AdminCourseDetailPage() {
                   <Input
                     value={course.certificateConfig.issuer}
                     onChange={(e) => {
-                      setCourse((prev) => ({
+                      updateCourse((prev) => ({
                         ...prev,
                         certificateConfig: {
                           ...prev.certificateConfig,
                           issuer: e.target.value
                         }
                       }))
-                      setHasChanges(true)
                     }}
                     className="border-border bg-secondary rounded-none"
                   />
@@ -1271,14 +1179,13 @@ export default function AdminCourseDetailPage() {
                   <Input
                     value={course.certificateConfig.sealUrl}
                     onChange={(e) => {
-                      setCourse((prev) => ({
+                      updateCourse((prev) => ({
                         ...prev,
                         certificateConfig: {
                           ...prev.certificateConfig,
                           sealUrl: e.target.value
                         }
                       }))
-                      setHasChanges(true)
                     }}
                     className="border-border bg-secondary rounded-none"
                   />
@@ -1290,14 +1197,13 @@ export default function AdminCourseDetailPage() {
                   <Input
                     value={course.certificateConfig.backgroundUrl}
                     onChange={(e) => {
-                      setCourse((prev) => ({
+                      updateCourse((prev) => ({
                         ...prev,
                         certificateConfig: {
                           ...prev.certificateConfig,
                           backgroundUrl: e.target.value
                         }
                       }))
-                      setHasChanges(true)
                     }}
                     className="border-border bg-secondary rounded-none"
                   />
@@ -1348,34 +1254,19 @@ export default function AdminCourseDetailPage() {
                 label="Notas e clausulas"
                 value={course.certificateConfig.notes}
                 onChange={(value) => {
-                  setCourse((prev) => ({
+                  updateCourse((prev) => ({
                     ...prev,
                     certificateConfig: {
                       ...prev.certificateConfig,
                       notes: value
                     }
                   }))
-                  setHasChanges(true)
                 }}
                 placeholder="Inclua observacoes legais e regras do certificado..."
               />
             </div>
           </div>
         )}
-
-        {/* Save Changes Button */}
-        {hasChanges && (
-          <div className="fixed bottom-4 left-4 right-4 sm:bottom-6 sm:left-auto sm:right-6">
-            <Button 
-              onClick={() => setHasChanges(false)}
-              className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none shadow-lg w-full sm:w-auto"
-            >
-              <Save className="h-4 w-4 mr-2" />
-              Salvar Alterações
-            </Button>
-          </div>
-        )}
-      </main>
 
       {/* Add Module Modal */}
       {showAddModuleModal && (
@@ -1699,20 +1590,47 @@ export default function AdminCourseDetailPage() {
                       Construtor de Questões
                     </h3>
                   </div>
-                  <div>
-                    <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                      Quantidade sorteada para o aluno
-                    </label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={newActivityDrawCount}
-                      onChange={(e) => setNewActivityDrawCount(Number(e.target.value))}
-                      className="border-border bg-secondary rounded-none"
-                    />
-                    <p className="text-xs text-[#6b7a5f] mt-2">
-                      O banco precisa ter ao menos {newActivityDrawCount} questões.
-                    </p>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                        Quantidade sorteada para o aluno
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={newActivityDrawCount}
+                        onChange={(e) => setNewActivityDrawCount(Number(e.target.value))}
+                        className="border-border bg-secondary rounded-none"
+                      />
+                      <p className="text-xs text-[#6b7a5f] mt-2">
+                        O banco precisa ter ao menos {newActivityDrawCount} questões.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                        Limite de tentativas
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={newActivityAttemptLimit}
+                        onChange={(e) => setNewActivityAttemptLimit(Number(e.target.value))}
+                        className="border-border bg-secondary rounded-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                        Valor total da atividade
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={newActivityTotalPoints}
+                        onChange={(e) => setNewActivityTotalPoints(Number(e.target.value))}
+                        className="border-border bg-secondary rounded-none"
+                      />
+                    </div>
                   </div>
                   {renderQuestionBuilder(newQuestions, setNewQuestions)}
                   {newQuestions.length < newActivityDrawCount && (
@@ -1839,6 +1757,41 @@ export default function AdminCourseDetailPage() {
                   <p className="text-xs text-[#6b7a5f] mt-2">
                     O banco precisa ter ao menos {newFinalExam.drawCount} questões.
                   </p>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Limite de tentativas
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={newFinalExam.attemptLimit}
+                    onChange={(e) =>
+                      setNewFinalExam({
+                        ...newFinalExam,
+                        attemptLimit: Number(e.target.value)
+                      })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Valor total do exame
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={newFinalExam.totalPoints}
+                    onChange={(e) =>
+                      setNewFinalExam({
+                        ...newFinalExam,
+                        totalPoints: Number(e.target.value)
+                      })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
                 </div>
               </div>
 

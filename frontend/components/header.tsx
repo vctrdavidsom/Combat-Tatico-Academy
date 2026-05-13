@@ -12,6 +12,7 @@ import {
   Settings,
   Bell
 } from "lucide-react"
+import { NotificationCenter } from "@/components/notification-center"
 
 interface HeaderProps {
   userName?: string
@@ -46,45 +47,54 @@ export function Header({ userName = "Operador", isAdmin = false }: HeaderProps) 
 
         {/* Desktop Nav */}
         <div className="hidden md:flex items-center gap-4">
-          <button className="relative p-2 text-[#6b7a5f] hover:text-foreground transition-colors">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1 right-1 h-2 w-2 bg-[#F4511E] rounded-full" />
-          </button>
-
-          <div className="h-8 w-px bg-border" />
-
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center bg-[#6b7a5f]/20 border border-[#6b7a5f]">
-              <User className="h-4 w-4 text-[#6b7a5f]" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">{userName}</p>
-              <p className="text-xs text-[#6b7a5f] uppercase">
-                {isAdmin ? "Administrador" : "Aluno"}
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-3 py-2 text-[#6b7a5f] hover:text-[#F4511E] transition-colors"
-          >
-            <LogOut className="h-4 w-4" />
-            <span className="text-xs uppercase tracking-wider">Sair</span>
-          </button>
+          {isAdmin ? (
+            <button className="relative p-2 text-[#6b7a5f] hover:text-foreground transition-colors">
+              <Bell className="h-5 w-5" />
+              <span className="absolute top-1 right-1 h-2 w-2 bg-[#F4511E] rounded-full" />
+            </button>
+          ) : (
+            <NotificationCenter />
+          )}
+          {isAdmin && (
+            <>
+              <div className="h-8 w-px bg-border" />
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center bg-[#6b7a5f]/20 border border-[#6b7a5f]">
+                  <User className="h-4 w-4 text-[#6b7a5f]" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">{userName}</p>
+                  <p className="text-xs text-[#6b7a5f] uppercase">Administrador</p>
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-2 text-[#6b7a5f] hover:text-[#F4511E] transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="text-xs uppercase tracking-wider">Sair</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Mobile Menu Button */}
-        <button
-          onClick={() => setMenuOpen(!menuOpen)}
-          className="md:hidden p-2 text-foreground"
-        >
-          {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-        </button>
+        {isAdmin ? (
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="md:hidden p-2 text-foreground"
+          >
+            {menuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          </button>
+        ) : (
+          <div className="md:hidden">
+            <NotificationCenter />
+          </div>
+        )}
       </div>
 
       {/* Mobile Menu */}
-      {menuOpen && (
+      {menuOpen && isAdmin && (
         <div className="md:hidden border-t border-border bg-secondary">
           <div className="p-4 space-y-4">
             <div className="flex items-center gap-3 pb-4 border-b border-border">
@@ -93,9 +103,7 @@ export function Header({ userName = "Operador", isAdmin = false }: HeaderProps) 
               </div>
               <div>
                 <p className="font-medium text-foreground">{userName}</p>
-                <p className="text-xs text-[#6b7a5f] uppercase">
-                  {isAdmin ? "Administrador" : "Aluno"}
-                </p>
+                <p className="text-xs text-[#6b7a5f] uppercase">Administrador</p>
               </div>
             </div>
 

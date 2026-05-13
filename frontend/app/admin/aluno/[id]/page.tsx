@@ -1,424 +1,579 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { 
-  ArrowLeft,
-  Mail,
-  Calendar,
-  Shield,
-  CheckCircle2,
-  XCircle,
-  BookOpen,
-  Clock,
+import {
   Award,
-  User
+  BookOpen,
+  CheckCircle2,
+  CircleDot,
+  ClipboardList,
+  FileText,
+  Shield,
+  Target,
+  UploadCloud,
+  XCircle
 } from "lucide-react"
-import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
+import {
+  useCombatContext,
+  type Question
+} from "@/contexts/CombatContext"
 
-// Mock data - em produção viria do banco de dados
-const studentsData: Record<string, {
-  id: number
-  name: string
-  email: string
-  enrolled: string
-  status: string
-  phone: string
-  courses: Record<string, boolean>
-}> = {
-  "1": {
-    id: 1,
-    name: "João Silva",
-    email: "joao.silva@email.com",
-    enrolled: "15/01/2024",
-    status: "ativo",
-    phone: "(11) 99999-1234",
-    courses: {
-      "CQC-001": true,
-      "SSP-002": true,
-      "ARM-003": false
-    }
-  },
-  "2": {
-    id: 2,
-    name: "Maria Santos",
-    email: "maria.santos@email.com",
-    enrolled: "22/02/2024",
-    status: "ativo",
-    phone: "(11) 99999-5678",
-    courses: {
-      "CQC-001": true,
-      "SSP-002": false,
-      "ARM-003": false
-    }
-  },
-  "3": {
-    id: 3,
-    name: "Carlos Oliveira",
-    email: "carlos.oliveira@email.com",
-    enrolled: "08/03/2024",
-    status: "pendente",
-    phone: "(11) 99999-9012",
-    courses: {
-      "CQC-001": false,
-      "SSP-002": false,
-      "ARM-003": false
-    }
-  },
-  "4": {
-    id: 4,
-    name: "Ana Costa",
-    email: "ana.costa@email.com",
-    enrolled: "10/01/2024",
-    status: "ativo",
-    phone: "(11) 99999-3456",
-    courses: {
-      "CQC-001": true,
-      "SSP-002": true,
-      "ARM-003": true
-    }
-  },
-  "5": {
-    id: 5,
-    name: "Pedro Ferreira",
-    email: "pedro.ferreira@email.com",
-    enrolled: "28/02/2024",
-    status: "inativo",
-    phone: "(11) 99999-7890",
-    courses: {
-      "CQC-001": true,
-      "SSP-002": false,
-      "ARM-003": false
-    }
-  }
-}
-
-const coursesList = [
-  { 
-    code: "CQC-001", 
-    name: "Táticas de Combate Próximo",
-    modules: 8,
-    hours: 24,
-    description: "Técnicas avançadas de defesa pessoal e combate corpo a corpo para situações de alto risco."
-  },
-  { 
-    code: "SSP-002", 
-    name: "Supervisor em Segurança Privada",
-    modules: 12,
-    hours: 60,
-    description: "Formação completa para supervisores de equipes de segurança patrimonial e pessoal."
-  },
-  { 
-    code: "ARM-003", 
-    name: "Instrução de Armeiro",
-    modules: 10,
-    hours: 40,
-    description: "Curso técnico sobre manutenção, reparo e manuseio seguro de armamentos."
-  }
-]
-
-const auditLog = [
-  {
-    id: 1,
-    action: "Curso liberado",
-    admin: "Comandante Admin",
-    date: "02/05/2026",
-    details: "CQC-001"
-  },
-  {
-    id: 2,
-    action: "Curso bloqueado",
-    admin: "Instrutor Alpha",
-    date: "29/04/2026",
-    details: "ARM-003"
-  }
-]
-
-export default function StudentPage() {
+export default function StudentAdminPage() {
   const params = useParams()
   const router = useRouter()
-  const studentId = params.id as string
+  const studentId = Number(params.id)
+  const {
+    listaAlunos,
+    listaCursos,
+    tentativasExames,
+    liberarCurso,
+    lancarNota,
+    uploadCertificadoExterno,
+    validarDocumentoAluno
+  } = useCombatContext()
 
-  const initialStudent = studentsData[studentId]
-  const [student, setStudent] = useState(initialStudent)
-  const [hasChanges, setHasChanges] = useState(false)
+  const student = listaAlunos.find((item) => item.id === studentId)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
+  const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
 
   if (!student) {
     return (
-      <div className="min-h-screen bg-background">
-        <Header userName="Comandante Admin" isAdmin />
-        <main className="p-4 md:p-6">
-          <div className="text-center py-12">
-            <p className="text-[#6b7a5f]">Aluno não encontrado.</p>
-            <Button 
-              onClick={() => router.push("/admin")}
-              className="mt-4 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none"
-            >
-              Voltar ao Painel
-            </Button>
-          </div>
-        </main>
+      <div className="border border-border bg-black p-6 text-xs text-[#6b7a5f]">
+        Aluno nao encontrado.
       </div>
     )
   }
 
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case "ativo":
-        return { label: "Ativo", color: "text-green-500", bg: "bg-green-500/10", border: "border-green-500" }
-      case "pendente":
-        return { label: "Pendente", color: "text-yellow-500", bg: "bg-yellow-500/10", border: "border-yellow-500" }
-      case "inativo":
-        return { label: "Inativo", color: "text-red-500", bg: "bg-red-500/10", border: "border-red-500" }
-      default:
-        return { label: status, color: "text-[#6b7a5f]", bg: "bg-[#6b7a5f]/10", border: "border-[#6b7a5f]" }
+  const studentAttempts = tentativasExames.filter((attempt) => attempt.alunoId === student.id)
+
+  const selectedAttempt = useMemo(() => {
+    if (!selectedAttemptId) return studentAttempts[0] || null
+    return studentAttempts.find((attempt) => attempt.id === selectedAttemptId) || null
+  }, [studentAttempts, selectedAttemptId])
+
+  const buildAttemptContext = (attemptId: number) => {
+    const attempt = studentAttempts.find((item) => item.id === attemptId)
+    if (!attempt) return null
+    const course = listaCursos.find((item) => item.id === attempt.courseId)
+    if (!course) return null
+
+    if (attempt.type === "exame") {
+      return {
+        courseName: course.name,
+        moduleName: "Exame Final",
+        activityName: course.finalExam?.title || attempt.title,
+        questions: course.finalExam?.questions || []
+      }
+    }
+
+    const module = course.modules.find(
+      (item) => item.id === attempt.moduleId || item.items.some((i) => i.id === attempt.contentId)
+    )
+    const item = module?.items.find((i) => i.id === attempt.contentId && i.type === "activity")
+    return {
+      courseName: course.name,
+      moduleName: module?.name,
+      activityName: item?.title || attempt.title,
+      questions: item?.questions || [],
+      totalPoints: item?.totalPoints
     }
   }
 
-  const handleCourseToggle = (courseCode: string) => {
-    setStudent(prev => ({
-      ...prev,
-      courses: {
-        ...prev.courses,
-        [courseCode]: !prev.courses[courseCode]
+  const sumQuestionPoints = (questions: Question[]) =>
+    Number(questions.reduce((sum, question) => sum + (question.weight ?? 1), 0).toFixed(2))
+
+  const sumObjectivePoints = (questions: Question[], answers: Record<number, string | number>) => {
+    let correct = 0
+    let total = 0
+    let points = 0
+    questions.forEach((question) => {
+      if (question.type !== "multiple") return
+      const weight = question.weight ?? 1
+      total += 1
+      if (answers[question.id] === question.correctIndex) {
+        correct += 1
+        points += weight
       }
+    })
+    return { correct, total, points: Number(points.toFixed(2)) }
+  }
+
+  const gradebook = useMemo(() => {
+    return listaCursos.map((course) => ({
+      course,
+      modules: course.modules.map((module) => {
+        const activities = module.items.filter((item) => item.type === "activity")
+        const rows = activities.map((item) => {
+          const questions = item.questions || []
+          const totalPoints = item.totalPoints ?? sumQuestionPoints(questions)
+          const attempts = studentAttempts.filter(
+            (attempt) => attempt.courseId === course.id && attempt.contentId === item.id && attempt.type === "atividade"
+          )
+          const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
+          let earnedPoints = 0
+          let statusLabel = "Sem envio"
+
+          if (lastAttempt) {
+            if (lastAttempt.status === "corrigido") {
+              if (typeof lastAttempt.scorePoints === "number") {
+                earnedPoints = Number(lastAttempt.scorePoints.toFixed(1))
+              } else {
+                earnedPoints = Number(((lastAttempt.scorePercent / 100) * totalPoints).toFixed(1))
+              }
+              statusLabel = lastAttempt.result === "apto" ? "Apto" : "Reprovado"
+            } else {
+              const partial = sumObjectivePoints(questions, lastAttempt.answers)
+              earnedPoints = Number(partial.points.toFixed(1))
+              statusLabel = "Pendente"
+            }
+          }
+
+          return {
+            id: item.id,
+            title: item.title,
+            earnedPoints,
+            totalPoints,
+            statusLabel
+          }
+        })
+
+        const moduleTotal = rows.reduce((sum, row) => sum + row.earnedPoints, 0)
+        return {
+          id: module.id,
+          name: module.name,
+          rows,
+          moduleTotal: Number(moduleTotal.toFixed(1))
+        }
+      })
     }))
-    setHasChanges(true)
+  }, [listaCursos, studentAttempts])
+
+  const handleCertificateUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return
+      uploadCertificadoExterno(student.id, {
+        name: file.name,
+        dataUrl: reader.result,
+        uploadedAt: new Date().toISOString().slice(0, 10)
+      })
+    }
+    reader.readAsDataURL(file)
   }
 
-  const handleSave = () => {
-    // Em produção, aqui salvaria no banco de dados
-    setHasChanges(false)
-    // Feedback visual de sucesso poderia ser adicionado aqui
+  const handleEssaySave = (attemptId: number, totalPoints: number) => {
+    const draft = essayDrafts[attemptId]
+    const points = Number(draft?.grade || 0)
+    const percent = totalPoints > 0 ? Math.round((points / totalPoints) * 100) : 0
+      const resolvedPoints = Number.isFinite(points)
+        ? points
+        : totalPoints > 0
+          ? Number(((percent / 100) * totalPoints).toFixed(2))
+          : 0
+      lancarNota(student.id, attemptId, percent, draft?.feedback, resolvedPoints, totalPoints)
   }
 
-  const statusConfig = getStatusConfig(student.status)
-  const activeCourses = Object.values(student.courses).filter(Boolean).length
+  const documents = student.documents || []
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Comandante Admin" isAdmin />
+    <div className="space-y-6">
+      <div className="border border-border bg-black p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Operador</p>
+            <h1 className="text-xl font-bold text-foreground">{student.name}</h1>
+            <p className="text-xs text-[#6b7a5f]">{student.email}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs uppercase tracking-wider text-[#F4511E]">{student.status}</span>
+            <Button
+              variant="outline"
+              onClick={() => router.push("/admin")}
+              className="border-border rounded-none text-xs"
+            >
+              Voltar
+            </Button>
+          </div>
+        </div>
+      </div>
 
-      <main className="p-4 md:p-6">
-        {/* Back Button */}
-        <button 
-          onClick={() => router.push("/admin")}
-          className="flex items-center gap-2 text-[#6b7a5f] hover:text-[#F4511E] transition-colors mb-6"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span className="text-sm uppercase tracking-wider">Voltar ao Painel</span>
-        </button>
-
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Student Info Card */}
-          <div className="lg:col-span-1">
-            <div className="border border-border bg-card">
-              {/* Header */}
-              <div className="p-4 border-b border-border sm:p-6">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-16 w-16 items-center justify-center bg-[#6b7a5f]/20 border-2 border-[#6b7a5f]">
-                    <span className="text-xl font-bold text-[#6b7a5f]">
-                      {student.name.split(" ").map(n => n[0]).join("")}
-                    </span>
-                  </div>
-                  <div>
-                    <h1 className="text-xl font-bold text-foreground">
-                      {student.name}
-                    </h1>
-                    <span className={`text-xs px-2 py-1 uppercase tracking-wider ${statusConfig.color} ${statusConfig.bg} ${statusConfig.border} border`}>
-                      {statusConfig.label}
-                    </span>
-                  </div>
-                </div>
+      <div className="grid gap-6 lg:grid-cols-[1.1fr_1.9fr]">
+        <section className="space-y-6">
+          <div className="border border-border bg-black p-4">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Dados Cadastrais</h2>
+            <div className="mt-4 space-y-3 text-sm">
+              <div>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">CPF</p>
+                <p className="font-mono text-foreground">{student.cpf || "Nao informado"}</p>
               </div>
-
-              {/* Info */}
-              <div className="p-4 space-y-4 sm:p-6">
-                <div className="flex items-center gap-3">
-                  <Mail className="h-4 w-4 text-[#6b7a5f]" />
-                  <div>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Email</p>
-                    <p className="text-sm text-foreground">{student.email}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <User className="h-4 w-4 text-[#6b7a5f]" />
-                  <div>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Telefone</p>
-                    <p className="text-sm text-foreground">{student.phone}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Calendar className="h-4 w-4 text-[#6b7a5f]" />
-                  <div>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Data de Matrícula</p>
-                    <p className="text-sm text-foreground">{student.enrolled}</p>
-                  </div>
-                </div>
+              <div>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Matricula</p>
+                <p className="font-mono text-foreground">{student.matricula || "Nao informado"}</p>
               </div>
-
-              {/* Stats */}
-              <div className="p-4 border-t border-border sm:p-6">
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div>
-                    <p className="text-2xl font-bold text-[#F4511E]">{activeCourses}</p>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Cursos</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-foreground">0</p>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Certificados</p>
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-foreground">0h</p>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Treino</p>
-                  </div>
-                </div>
+              <div>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Telefone</p>
+                <p className="text-foreground">{student.phone}</p>
               </div>
             </div>
           </div>
 
-          {/* Courses Management */}
-          <div className="lg:col-span-2">
-            <div className="border border-border bg-card">
-              <div className="p-4 border-b border-border flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
-                    <BookOpen className="h-5 w-5 text-[#F4511E]" />
+          <div className="border border-border bg-black p-4">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Documentos</h2>
+            <div className="mt-4 space-y-3">
+              {documents.length === 0 ? (
+                <p className="text-xs text-[#6b7a5f]">Nenhum documento enviado.</p>
+              ) : (
+                documents.map((doc) => (
+                  <div key={doc.id} className="border border-border p-3 space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <div>
+                        <p className="text-[#6b7a5f] uppercase tracking-wider">{doc.name}</p>
+                        <p className="text-[10px] text-[#6b7a5f]">{doc.uploadedAt}</p>
+                      </div>
+                      <span className="text-[#F4511E] uppercase tracking-wider">{doc.status}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => validarDocumentoAluno(student.id, doc.id, "validado")}
+                        className="flex-1 bg-[#F4511E] text-black rounded-none text-xs"
+                      >
+                        Aprovar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => validarDocumentoAluno(student.id, doc.id, "recusado")}
+                        className="flex-1 border-border rounded-none text-xs"
+                      >
+                        Recusar
+                      </Button>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="font-bold text-foreground">Gerenciar Cursos</h2>
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                      Liberar ou Bloquear Acesso
-                    </p>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="border border-border bg-black p-4">
+            <div className="flex items-center gap-2 text-[#F4511E]">
+              <UploadCloud className="h-4 w-4" />
+              <h2 className="text-sm font-bold uppercase tracking-wider">Certificado Externo</h2>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,image/*"
+              className="hidden"
+              onChange={handleCertificateUpload}
+            />
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-4 bg-[#F4511E] text-black rounded-none"
+            >
+              Upload de Certificado
+            </Button>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="border border-border bg-black">
+            <div className="p-3 border-b border-border text-xs uppercase tracking-wider text-[#6b7a5f]">
+              Cursos liberados
+            </div>
+            <div className="divide-y divide-border">
+              {listaCursos.map((course) => {
+                const isEnabled = Boolean(student.courses[course.id])
+                return (
+                  <div key={course.id} className="p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{course.code}</p>
+                      <p className="text-sm text-foreground">{course.name}</p>
+                    </div>
+                    <Switch
+                      checked={isEnabled}
+                      onCheckedChange={() => liberarCurso(student.id, course.id)}
+                      className="data-[state=checked]:bg-[#F4511E]"
+                    />
                   </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="border border-border bg-black p-4">
+            <div className="flex items-center gap-2 text-[#F4511E]">
+              <ClipboardList className="h-4 w-4" />
+              <h2 className="text-sm font-bold uppercase tracking-wider">Central de Correcao</h2>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[1fr_2fr] mt-4">
+              <div className="border border-border">
+                <div className="p-2 text-[10px] uppercase tracking-wider text-[#6b7a5f] border-b border-border">
+                  Atividades
                 </div>
-                {hasChanges && (
-                  <Button 
-                    onClick={handleSave}
-                    className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none w-full sm:w-auto"
-                  >
-                    Salvar Alterações
-                  </Button>
-                )}
+                <div className="divide-y divide-border">
+                  {studentAttempts.length === 0 ? (
+                    <div className="p-3 text-xs text-[#6b7a5f]">Sem atividades.</div>
+                  ) : (
+                    studentAttempts.map((attempt) => (
+                      <button
+                        key={attempt.id}
+                        onClick={() => setSelectedAttemptId(attempt.id)}
+                        className={`w-full text-left p-3 text-xs ${
+                          selectedAttempt?.id === attempt.id
+                            ? "bg-[#F4511E]/10 border-l-2 border-[#F4511E]"
+                            : "hover:bg-[#111111]"
+                        }`}
+                      >
+                        <p className="text-[10px] text-[#6b7a5f] uppercase tracking-wider">{attempt.type}</p>
+                        <p className="text-sm text-foreground font-medium">{attempt.title}</p>
+                        <p className="text-[10px] text-[#6b7a5f]">{attempt.submittedAt}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
               </div>
 
-              <div className="divide-y divide-border">
-                {coursesList.map((course) => {
-                  const isEnabled = student.courses[course.code]
-                  return (
-                    <div 
-                      key={course.code}
-                      className={`p-4 transition-colors ${isEnabled ? "bg-[#F4511E]/5" : ""}`}
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className={`flex h-12 w-12 items-center justify-center border ${isEnabled ? "border-[#F4511E] bg-[#F4511E]/10" : "border-[#6b7a5f] bg-[#6b7a5f]/10"}`}>
-                          <Shield className={`h-6 w-6 ${isEnabled ? "text-[#F4511E]" : "text-[#6b7a5f]"}`} />
+              <div className="border border-border p-3">
+                {!selectedAttempt ? (
+                  <p className="text-xs text-[#6b7a5f]">Selecione uma atividade para revisar.</p>
+                ) : (
+                  <AttemptReview
+                    attempt={selectedAttempt}
+                    context={buildAttemptContext(selectedAttempt.id)}
+                    draft={essayDrafts[selectedAttempt.id]}
+                    onDraftChange={(patch) =>
+                      setEssayDrafts((prev) => ({
+                        ...prev,
+                        [selectedAttempt.id]: { ...prev[selectedAttempt.id], ...patch }
+                      }))
+                    }
+                    onSave={(totalPoints) => handleEssaySave(selectedAttempt.id, totalPoints)}
+                    sumObjectivePoints={sumObjectivePoints}
+                    sumQuestionPoints={sumQuestionPoints}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-border bg-black p-4">
+            <div className="flex items-center gap-2 text-[#F4511E]">
+              <BookOpen className="h-4 w-4" />
+              <h2 className="text-sm font-bold uppercase tracking-wider">Boletim por Modulos</h2>
+            </div>
+            <div className="mt-4 space-y-4">
+              {gradebook.map((entry) => (
+                <div key={entry.course.id} className="border border-border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{entry.course.code}</p>
+                      <p className="text-sm text-foreground">{entry.course.name}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {entry.modules.map((module) => (
+                      <div key={module.id} className="border border-border p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-foreground font-medium">{module.name}</p>
+                          <span className="text-xs font-mono text-[#F4511E]">
+                            Total: {module.moduleTotal.toFixed(1)}
+                          </span>
                         </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-start">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                                  {course.code}
-                                </span>
-                                {isEnabled ? (
-                                  <span className="flex items-center gap-1 text-xs text-green-500">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    Liberado
-                                  </span>
-                                ) : (
-                                  <span className="flex items-center gap-1 text-xs text-red-500">
-                                    <XCircle className="h-3 w-3" />
-                                    Bloqueado
-                                  </span>
-                                )}
+                        <div className="mt-2 space-y-2">
+                          {module.rows.map((row) => (
+                            <div key={row.id} className="flex items-center justify-between text-xs border border-border p-2">
+                              <div>
+                                <p className="text-[10px] text-[#6b7a5f] uppercase tracking-wider">{row.statusLabel}</p>
+                                <p className="text-sm text-foreground">{row.title}</p>
                               </div>
-                              <h3 className="font-bold text-foreground mb-2">
-                                {course.name}
-                              </h3>
-                              <p className="text-sm text-[#6b7a5f] mb-3 break-words">
-                                {course.description}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-[#6b7a5f]">
-                                <span className="flex items-center gap-1">
-                                  <BookOpen className="h-3 w-3" />
-                                  {course.modules} módulos
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  {course.hours}h de conteúdo
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Award className="h-3 w-3" />
-                                  Certificado incluso
-                                </span>
-                              </div>
-                            </div>
-                            
-                            <div className="flex items-center gap-3 sm:shrink-0">
-                              <span className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                                {isEnabled ? "Ativo" : "Inativo"}
+                              <span className="text-[#F4511E] font-mono">
+                                {row.earnedPoints.toFixed(1)} / {row.totalPoints.toFixed(1)}
                               </span>
-                              <Switch
-                                checked={isEnabled}
-                                onCheckedChange={() => handleCourseToggle(course.code)}
-                                className="data-[state=checked]:bg-[#F4511E]"
-                              />
                             </div>
-                          </div>
+                          ))}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="border border-border bg-black p-4">
+        <div className="flex items-center gap-2 text-[#F4511E]">
+          <Shield className="h-4 w-4" />
+          <h2 className="text-sm font-bold uppercase tracking-wider">Auditoria</h2>
+        </div>
+        <div className="mt-3 space-y-2 text-xs text-[#6b7a5f]">
+          {student.auditLog.map((entry) => (
+            <div key={entry.id} className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[#F4511E]" />
+              {entry.action} em {entry.date} {entry.details ? `- ${entry.details}` : ""}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type AttemptReviewProps = {
+  attempt: {
+    id: number
+    answers: Record<number, string | number>
+    hasEssay: boolean
+    status: "pendente" | "corrigido"
+    scorePercent: number
+    scorePoints?: number
+    totalPoints?: number
+  }
+  context: {
+    courseName: string
+    moduleName?: string
+    activityName: string
+    questions: Question[]
+    totalPoints?: number
+  } | null
+  draft?: { grade?: string; feedback?: string }
+  onDraftChange: (patch: { grade?: string; feedback?: string }) => void
+  onSave: (totalPoints: number) => void
+  sumObjectivePoints: (questions: Question[], answers: Record<number, string | number>) => { correct: number; total: number; points: number }
+  sumQuestionPoints: (questions: Question[]) => number
+}
+
+function AttemptReview({
+  attempt,
+  context,
+  draft,
+  onDraftChange,
+  onSave,
+  sumObjectivePoints,
+  sumQuestionPoints
+}: AttemptReviewProps) {
+  if (!context) {
+    return <p className="text-xs text-[#6b7a5f]">Dados da atividade indisponiveis.</p>
+  }
+
+  const totalPoints = context.totalPoints ?? attempt.totalPoints ?? sumQuestionPoints(context.questions)
+  const objective = sumObjectivePoints(context.questions, attempt.answers)
+  const currentPoints =
+    typeof attempt.scorePoints === "number"
+      ? attempt.scorePoints
+      : Number(((attempt.scorePercent / 100) * totalPoints).toFixed(1))
+
+  return (
+    <div className="space-y-4">
+      <div className="border-b border-border pb-3">
+        <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{context.courseName}</p>
+        <h3 className="text-sm text-foreground font-bold">{context.activityName}</h3>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#6b7a5f]">
+          <span>Acertos: {objective.correct}/{objective.total}</span>
+          {attempt.status === "pendente" ? (
+            <span className="text-[#F4511E] font-mono">
+              Parcial: {objective.points.toFixed(1)} / {totalPoints.toFixed(1)}
+            </span>
+          ) : (
+            <span className="text-green-400 font-mono">
+              Nota final: {currentPoints.toFixed(1)} / {totalPoints.toFixed(1)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {context.questions.map((question) => (
+          <div key={question.id} className="border border-border p-3">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#6b7a5f]">
+              <CircleDot className="h-3 w-3" /> Questao {question.id}
+            </div>
+            <p className="text-sm text-foreground mt-2">{question.prompt}</p>
+
+            {question.type === "multiple" ? (
+              <div className="mt-3 space-y-2">
+                {(question.options || []).map((option, index) => {
+                  const selected = attempt.answers[question.id] === index
+                  const correct = question.correctIndex === index
+                  const stateClass = selected
+                    ? correct
+                      ? "border-green-500 text-green-400"
+                      : "border-red-500 text-red-400"
+                    : correct
+                      ? "border-green-500 text-green-400"
+                      : "border-border text-[#6b7a5f]"
+                  return (
+                    <div key={index} className={`border px-3 py-2 text-xs ${stateClass}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono">{String(index + 1).padStart(2, "0")}</span>
+                        <span>{option}</span>
+                        {selected && (
+                          <span className="ml-auto text-[10px] uppercase">Marcada</span>
+                        )}
+                        {correct && !selected && (
+                          <span className="ml-auto text-[10px] uppercase">Correta</span>
+                        )}
                       </div>
                     </div>
                   )
                 })}
               </div>
-            </div>
-
-            {/* Activity Log */}
-            <div className="border border-border bg-card mt-6">
-              <div className="p-4 border-b border-border">
-                <h3 className="font-bold text-foreground">Auditoria de Acoes</h3>
-                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                  Historico de permissoes e desbloqueios
+            ) : (
+              <div className="mt-3 border border-border p-3 text-xs text-[#6b7a5f]">
+                <p className="text-[10px] uppercase tracking-wider">Resposta dissertativa</p>
+                <p className="text-foreground mt-2">
+                  {String(attempt.answers[question.id] || "Sem resposta")}
                 </p>
+                {attempt.status === "pendente" && (
+                  <span className="text-[#F4511E] text-[10px] uppercase tracking-wider">
+                    Aguardando correcao do administrador
+                  </span>
+                )}
               </div>
-              <div className="p-4">
-                <div className="space-y-3">
-                  {auditLog.map((entry) => (
-                    <div key={entry.id} className="flex items-center gap-3 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-[#F4511E]" />
-                      <span className="text-[#6b7a5f]">
-                        {entry.action} por {entry.admin} em {entry.date} - {entry.details}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Activity Log */}
-            <div className="border border-border bg-card mt-6">
-              <div className="p-4 border-b border-border">
-                <h3 className="font-bold text-foreground">Histórico de Atividades</h3>
-                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                  Últimas ações do aluno
-                </p>
-              </div>
-              <div className="p-4">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3 text-sm">
-                    <div className="w-2 h-2 rounded-full bg-[#6b7a5f]" />
-                    <span className="text-[#6b7a5f]">Nenhuma atividade registrada ainda.</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
+        ))}
+      </div>
+
+      {attempt.hasEssay && attempt.status === "pendente" && (
+        <div className="border border-border p-3 space-y-3">
+          <div className="flex items-center gap-2 text-[#F4511E]">
+            <Target className="h-4 w-4" />
+            <h4 className="text-xs uppercase tracking-wider">Lancar nota</h4>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_2fr]">
+            <Input
+              type="number"
+              min={0}
+              step="0.1"
+              value={draft?.grade || ""}
+              onChange={(event) => onDraftChange({ grade: event.target.value })}
+              className="border-border bg-black rounded-none text-sm"
+              placeholder={`0 - ${totalPoints.toFixed(1)}`}
+            />
+            <Input
+              value={draft?.feedback || ""}
+              onChange={(event) => onDraftChange({ feedback: event.target.value })}
+              className="border-border bg-black rounded-none text-sm"
+              placeholder="Feedback do instrutor"
+            />
+          </div>
+          <Button
+            onClick={() => onSave(totalPoints)}
+            className="bg-[#F4511E] text-black rounded-none"
+          >
+            Salvar correcao
+          </Button>
         </div>
-      </main>
+      )}
     </div>
   )
 }
+

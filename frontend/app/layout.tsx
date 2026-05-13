@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
+import { CombatProvider } from '@/contexts/CombatContext'
 
 const jetbrainsMono = JetBrains_Mono({ 
   subsets: ["latin"],
@@ -39,7 +40,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className="bg-background">
       <body className={`${jetbrainsMono.variable} font-mono antialiased`}>
-        {children}
+        <CombatProvider>{children}</CombatProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

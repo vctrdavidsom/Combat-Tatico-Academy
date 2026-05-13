@@ -1,49 +1,59 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { FileText, Link2, Plus } from "lucide-react"
-import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { initialLibraryItems, type LibraryItem, type LibraryItemType } from "@/lib/admin-library"
+import { type LibraryItemType } from "@/lib/admin-library"
+import { useCombatContext } from "@/contexts/CombatContext"
 
 export default function LibraryPage() {
-  const [items, setItems] = useState<LibraryItem[]>(initialLibraryItems)
+  const {
+    bibliotecaArquivos,
+    adicionarArquivoBiblioteca,
+    atualizarArquivoBiblioteca,
+    removerArquivoBiblioteca
+  } = useCombatContext()
   const [newItem, setNewItem] = useState({
     title: "",
     type: "pdf" as LibraryItemType,
     url: "",
     tags: ""
   })
+  const [search, setSearch] = useState("")
+  const [tagFilter, setTagFilter] = useState("")
 
   const handleAddItem = () => {
     if (!newItem.title || !newItem.url) {
       return
     }
 
-    const nextId = Math.max(0, ...items.map((item) => item.id)) + 1
-    setItems((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        title: newItem.title,
-        type: newItem.type,
-        url: newItem.url,
-        tags: newItem.tags
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-        updatedAt: new Date().toLocaleDateString('pt-BR')
-      }
-    ])
+    adicionarArquivoBiblioteca({
+      title: newItem.title,
+      type: newItem.type,
+      url: newItem.url,
+      tags: newItem.tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    })
     setNewItem({ title: "", type: "pdf", url: "", tags: "" })
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Comandante Admin" isAdmin />
+  const filteredItems = useMemo(() => {
+    return bibliotecaArquivos.filter((item) => {
+      const matchesSearch =
+        item.title.toLowerCase().includes(search.toLowerCase()) ||
+        item.url.toLowerCase().includes(search.toLowerCase())
+      const matchesTag = tagFilter
+        ? item.tags.some((tag) => tag.toLowerCase().includes(tagFilter.toLowerCase()))
+        : true
+      return matchesSearch && matchesTag
+    })
+  }, [bibliotecaArquivos, search, tagFilter])
 
-      <main className="p-4 md:p-6 space-y-6">
+  return (
+    <div className="space-y-6">
         <div className="border border-border bg-card p-4">
           <h1 className="text-lg font-bold text-foreground">Biblioteca Global</h1>
           <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
@@ -87,10 +97,24 @@ export default function LibraryPage() {
               Adicionar
             </Button>
           </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+            <Input
+              placeholder="Buscar por titulo ou URL"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="border-border bg-secondary rounded-none"
+            />
+            <Input
+              placeholder="Filtrar por tag"
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="border-border bg-secondary rounded-none"
+            />
+          </div>
         </div>
 
         <div className="grid gap-4">
-          {items.map((item) => (
+          {filteredItems.map((item) => (
             <div key={item.id} className="border border-border bg-card p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
@@ -102,7 +126,11 @@ export default function LibraryPage() {
                     )}
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-foreground">{item.title}</p>
+                    <input
+                      value={item.title}
+                      onChange={(e) => atualizarArquivoBiblioteca(item.id, { title: e.target.value })}
+                      className="text-sm font-bold text-foreground bg-transparent border-b border-transparent focus:border-[#F4511E] outline-none w-full"
+                    />
                     <p className="text-xs text-[#6b7a5f] break-all">{item.url}</p>
                   </div>
                 </div>
@@ -117,10 +145,35 @@ export default function LibraryPage() {
                   </span>
                 ))}
               </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                <Input
+                  value={item.url}
+                  onChange={(e) => atualizarArquivoBiblioteca(item.id, { url: e.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+                <Input
+                  value={item.tags.join(", ")}
+                  onChange={(e) =>
+                    atualizarArquivoBiblioteca(item.id, {
+                      tags: e.target.value
+                        .split(",")
+                        .map((tag) => tag.trim())
+                        .filter(Boolean)
+                    })
+                  }
+                  className="border-border bg-secondary rounded-none"
+                />
+                <Button
+                  onClick={() => removerArquivoBiblioteca(item.id)}
+                  variant="outline"
+                  className="border-[#6b7a5f] text-[#6b7a5f] rounded-none"
+                >
+                  Remover
+                </Button>
+              </div>
             </div>
           ))}
         </div>
-      </main>
     </div>
   )
 }

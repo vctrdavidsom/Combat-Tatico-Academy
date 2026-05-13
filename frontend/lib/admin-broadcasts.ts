@@ -1,4 +1,4 @@
-export type BroadcastPriority = 'baixa' | 'media' | 'alta'
+export type BroadcastPriority = "informativo" | "critico"
 
 export interface BroadcastNotice {
   id: number
@@ -14,7 +14,7 @@ export const initialBroadcasts: BroadcastNotice[] = [
     id: 1,
     title: 'Treino de simulacao agendado',
     message: 'Exercicio pratico no dia 10/05 as 08:00. Comparecer com uniforme completo.',
-    priority: 'alta',
+    priority: "critico",
     author: 'Comando Central',
     createdAt: '01/05/2026'
   },
@@ -22,7 +22,7 @@ export const initialBroadcasts: BroadcastNotice[] = [
     id: 2,
     title: 'Atualizacao de material CQC',
     message: 'Novo manual tatico disponivel na biblioteca global. Revisao obrigatoria.',
-    priority: 'media',
+    priority: "informativo",
     author: 'Instrutor chefe',
     createdAt: '30/04/2026'
   }

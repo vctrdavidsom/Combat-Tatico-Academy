@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Shield, Lock, User, AlertTriangle, Eye, EyeOff, Mail, ArrowLeft, KeyRound, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useCombatContext } from "@/contexts/CombatContext"
 
 type ScreenState = "login" | "forgot-password" | "verify-code" | "new-password" | "success"
 
@@ -24,6 +25,7 @@ export default function LoginPage() {
   const [showNewPassword, setShowNewPassword] = useState(false)
   
   const router = useRouter()
+  const { login } = useCombatContext()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -32,13 +34,13 @@ export default function LoginPage() {
 
     await new Promise(resolve => setTimeout(resolve, 1000))
 
-    if (email === "admin@combat.com" && password === "admin123") {
-      router.push("/admin")
-    } else if (email && password) {
-      router.push("/dashboard")
-    } else {
+    const result = login({ email, password })
+    if (!result.ok) {
       setError("CREDENCIAIS INVÁLIDAS")
+      setIsLoading(false)
+      return
     }
+    router.push(result.role === "admin" ? "/admin" : "/dashboard")
 
     setIsLoading(false)
   }

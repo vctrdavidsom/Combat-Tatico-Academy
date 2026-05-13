@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { 
   Users, 
   BookOpen, 
@@ -11,9 +11,6 @@ import {
   ChevronRight,
   Mail,
   Calendar,
-  Shield,
-  TrendingUp,
-  Clock,
   UserPlus,
   X,
   Eye,
@@ -24,73 +21,26 @@ import {
   Lock,
   ClipboardCheck,
   Megaphone,
-  FolderOpen
+  FolderOpen,
+  BarChart3
 } from "lucide-react"
-import { Header } from "@/components/header"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-
-const initialStudents = [
-  {
-    id: 1,
-    name: "João Silva",
-    email: "joao.silva@email.com",
-    enrolled: "15/01/2024",
-    status: "ativo",
-    coursesCount: 2
-  },
-  {
-    id: 2,
-    name: "Maria Santos",
-    email: "maria.santos@email.com",
-    enrolled: "22/02/2024",
-    status: "ativo",
-    coursesCount: 1
-  },
-  {
-    id: 3,
-    name: "Carlos Oliveira",
-    email: "carlos.oliveira@email.com",
-    enrolled: "08/03/2024",
-    status: "pendente",
-    coursesCount: 0
-  },
-  {
-    id: 4,
-    name: "Ana Costa",
-    email: "ana.costa@email.com",
-    enrolled: "10/01/2024",
-    status: "ativo",
-    coursesCount: 3
-  },
-  {
-    id: 5,
-    name: "Pedro Ferreira",
-    email: "pedro.ferreira@email.com",
-    enrolled: "28/02/2024",
-    status: "inativo",
-    coursesCount: 1
-  }
-]
-
-const coursesList = [
-  { code: "CQC-001", name: "Táticas de Combate Próximo" },
-  { code: "SSP-002", name: "Supervisor em Segurança Privada" },
-  { code: "ARM-003", name: "Instrução de Armeiro" }
-]
-
-const stats = [
-  { label: "Total de Alunos", value: "156", change: "+12%", icon: Users },
-  { label: "Cursos Ativos", value: "3", change: "", icon: BookOpen },
-  { label: "Taxa de Conclusao", value: "78%", change: "+5%", icon: TrendingUp },
-  { label: "Nota Media", value: "84%", change: "+2%", icon: Clock }
-]
+import { useCombatContext } from "@/contexts/CombatContext"
 
 export default function AdminPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const { listaAlunos, cadastrarAluno } = useCombatContext()
   const [searchQuery, setSearchQuery] = useState("")
-  const [students, setStudents] = useState(initialStudents)
-  const [activeTab, setActiveTab] = useState("alunos")
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get("view") === "cursos" ? "cursos" : "alunos"
+  )
+    useEffect(() => {
+      const view = searchParams.get("view")
+      if (!view) return
+      setActiveTab(view === "cursos" ? "cursos" : "alunos")
+    }, [searchParams])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [newStudent, setNewStudent] = useState({ 
@@ -106,10 +56,14 @@ export default function AdminPage() {
     confirmPassword: ""
   })
 
-  const filteredStudents = students.filter(student =>
-    student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.email.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredStudents = useMemo(() => {
+    const term = searchQuery.toLowerCase()
+    return listaAlunos.filter(
+      (student) =>
+        student.name.toLowerCase().includes(term) ||
+        student.email.toLowerCase().includes(term)
+    )
+  }, [listaAlunos, searchQuery])
 
   const getStatusConfig = (status: string) => {
     switch (status) {
@@ -128,19 +82,17 @@ export default function AdminPage() {
     if (newStudent.name && newStudent.email && newStudent.cpf && newStudent.password && newStudent.password === newStudent.confirmPassword) {
       const today = new Date()
       const formattedDate = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`
-      
-      const newId = Math.max(...students.map(s => s.id)) + 1
-      setStudents([
-        ...students,
-        {
-          id: newId,
-          name: newStudent.name,
-          email: newStudent.email,
-          enrolled: formattedDate,
-          status: "pendente",
-          coursesCount: 0
-        }
-      ])
+
+      cadastrarAluno({
+        name: newStudent.name,
+        email: newStudent.email,
+        password: newStudent.password,
+        enrolled: formattedDate,
+        status: "pendente",
+        phone: newStudent.phone,
+        cpf: newStudent.cpf,
+        courses: {}
+      })
       setNewStudent({ 
         name: "", 
         email: "", 
@@ -170,35 +122,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Comandante Admin" isAdmin />
-
-      <main className="p-4 md:p-6">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {stats.map((stat) => (
-            <div key={stat.label} className="border border-border bg-card p-4 relative overflow-hidden">
-              <div className="absolute inset-0 opacity-5" style={{
-                backgroundImage: "repeating-linear-gradient(90deg, transparent, transparent 12px, #F4511E 12px, #F4511E 13px)"
-              }} />
-              <div className="flex items-start justify-between relative">
-                <div>
-                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-1">
-                    {stat.label}
-                  </p>
-                  <p className="text-2xl font-bold text-foreground">{stat.value}</p>
-                  {stat.change && (
-                    <p className="text-xs text-green-500 mt-1">{stat.change} este mês</p>
-                  )}
-                </div>
-                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
-                  <stat.icon className="h-5 w-5 text-[#F4511E]" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
+    <div className="space-y-6">
         {/* Command Center */}
         <div className="border border-border bg-card p-4 mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -239,6 +163,16 @@ export default function AdminPage() {
                 <p className="text-sm text-foreground">Broadcast Operacional</p>
               </div>
               <Megaphone className="h-5 w-5 text-[#F4511E]" />
+            </button>
+            <button
+              onClick={() => router.push("/admin/relatorios")}
+              className="flex items-center justify-between border border-border bg-secondary/30 p-4 hover:border-[#F4511E] transition-colors"
+            >
+              <div>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Analise</p>
+                <p className="text-sm text-foreground">Relatorios</p>
+              </div>
+              <BarChart3 className="h-5 w-5 text-[#F4511E]" />
             </button>
           </div>
         </div>
@@ -320,6 +254,7 @@ export default function AdminPage() {
                   <tbody className="divide-y divide-border">
                     {filteredStudents.map((student) => {
                       const status = getStatusConfig(student.status)
+                      const coursesCount = Object.values(student.courses || {}).filter(Boolean).length
                       return (
                         <tr 
                           key={student.id} 
@@ -357,7 +292,7 @@ export default function AdminPage() {
                           </td>
                           <td className="p-4 text-center hidden sm:table-cell">
                             <span className="text-sm font-bold text-foreground">
-                              {student.coursesCount}
+                              {coursesCount}
                             </span>
                             <span className="text-xs text-[#6b7a5f]"> / 3</span>
                           </td>
@@ -401,8 +336,6 @@ export default function AdminPage() {
             </Button>
           </div>
         )}
-      </main>
-
       {/* Add Student Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">

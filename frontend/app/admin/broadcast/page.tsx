@@ -2,18 +2,18 @@
 
 import { useState } from "react"
 import { Megaphone, Send } from "lucide-react"
-import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { initialBroadcasts, type BroadcastNotice, type BroadcastPriority } from "@/lib/admin-broadcasts"
+import { type BroadcastPriority } from "@/lib/admin-broadcasts"
+import { useCombatContext } from "@/contexts/CombatContext"
 
 export default function BroadcastPage() {
-  const [notices, setNotices] = useState<BroadcastNotice[]>(initialBroadcasts)
+  const { quadroAvisos, criarAviso } = useCombatContext()
   const [draft, setDraft] = useState({
     title: "",
     message: "",
-    priority: "media" as BroadcastPriority
+    priority: "informativo" as BroadcastPriority
   })
 
   const handleSend = () => {
@@ -21,26 +21,16 @@ export default function BroadcastPage() {
       return
     }
 
-    const nextId = Math.max(0, ...notices.map((notice) => notice.id)) + 1
-    setNotices((prev) => [
-      {
-        id: nextId,
-        title: draft.title,
-        message: draft.message,
-        priority: draft.priority,
-        author: "Comando Central",
-        createdAt: new Date().toLocaleDateString('pt-BR')
-      },
-      ...prev
-    ])
-    setDraft({ title: "", message: "", priority: "media" })
+    criarAviso({
+      title: draft.title,
+      message: draft.message,
+      priority: draft.priority
+    })
+    setDraft({ title: "", message: "", priority: "informativo" })
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header userName="Comandante Admin" isAdmin />
-
-      <main className="p-4 md:p-6 space-y-6">
+    <div className="space-y-6">
         <div className="border border-border bg-card p-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
@@ -68,9 +58,8 @@ export default function BroadcastPage() {
               onChange={(e) => setDraft({ ...draft, priority: e.target.value as BroadcastPriority })}
               className="border border-border bg-secondary text-xs uppercase tracking-wider rounded-none px-2 py-2 text-[#6b7a5f]"
             >
-              <option value="baixa">Baixa</option>
-              <option value="media">Media</option>
-              <option value="alta">Alta</option>
+                <option value="informativo">Informativo</option>
+                <option value="critico">Critico</option>
             </select>
           </div>
           <Textarea
@@ -89,7 +78,7 @@ export default function BroadcastPage() {
         </div>
 
         <div className="grid gap-4">
-          {notices.map((notice) => (
+          {quadroAvisos.map((notice) => (
             <div key={notice.id} className="border border-border bg-card p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -104,7 +93,6 @@ export default function BroadcastPage() {
             </div>
           ))}
         </div>
-      </main>
     </div>
   )
 }
