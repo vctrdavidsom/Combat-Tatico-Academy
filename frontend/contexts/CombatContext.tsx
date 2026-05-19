@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { courseMock } from "@/lib/course-data"
 import { initialLibraryItems, type LibraryItem } from "@/lib/admin-library"
-import { initialBroadcasts, type BroadcastNotice } from "@/lib/admin-broadcasts"
 
 export type QuestionType = "multiple" | "essay"
 
@@ -23,20 +22,32 @@ export type MaterialAttachment = {
   url: string
 }
 
-export type ContentType = "video" | "material" | "activity"
+export type LessonType = "video" | "material"
 
-export type ContentItem = {
+export type Lesson = {
   id: number
-  type: ContentType
+  type: LessonType
   title: string
   videoId?: string
   duration?: string
   materialPdfUrl?: string
   materialLinkUrl?: string
   materials?: MaterialAttachment[]
-  drawCount?: number
-  attemptLimit?: number
-  questions?: Question[]
+}
+
+export type ExamType = "activity" | "final"
+
+export type Exam = {
+  id: number
+  title: string
+  type: ExamType
+  courseId?: number
+  moduleId?: number
+  cutScore?: number
+  durationMinutes?: number
+  drawCount: number
+  attemptLimit: number
+  questions: Question[]
   totalPoints?: number
 }
 
@@ -44,29 +55,8 @@ export type CourseModule = {
   id: number
   name: string
   description: string
-  isExpanded?: boolean
-  items: ContentItem[]
-}
-
-export type FinalExam = {
-  id: number
-  title: string
-  cutScore: number
-  durationMinutes: number
-  drawCount: number
-  attemptLimit: number
-  questions: Question[]
-  totalPoints?: number
-}
-
-export type CertificateConfig = {
-  title: string
-  subtitle: string
-  issuer: string
-  sealUrl: string
-  backgroundUrl: string
-  signers: { id: number; name: string; role: string }[]
-  notes?: string
+  lessons: Lesson[]
+  exams: Exam[]
 }
 
 export type Course = {
@@ -78,76 +68,76 @@ export type Course = {
   totalHours: string
   status: string
   modules: CourseModule[]
-  finalExam: FinalExam | null
-  certificateConfig: CertificateConfig
+  finalExam: Exam | null
 }
 
-export type AuditEntry = {
+export type Certificate = {
   id: number
-  action: string
-  date: string
-  details?: string
+  userId: number
+  courseId: number
+  fileUrl: string
 }
 
-export type CertificateFile = {
-  name: string
-  dataUrl: string
-  uploadedAt: string
-}
+export type NotificationSeverity = "info" | "critical"
 
-export type NotificationType =
-  | "AULA_NOVA"
-  | "ATIVIDADE_CORRIGIDA"
-  | "NOVA_ATIVIDADE"
-  | "BROADCAST_GERAL"
+export type NotificationScope = "user" | "global"
 
-export type NotificationItem = {
+export type NotificationKind =
+  | "LESSON_NEW"
+  | "EXAM_GRADED"
+  | "EXAM_AVAILABLE"
+  | "GLOBAL_ALERT"
+
+export type Notification = {
   id: number
-  tipo: NotificationType
-  mensagem: string
-  rota: string
-  lida: boolean
-  timestamp: string
+  kind: NotificationKind
+  title?: string
+  message: string
+  link: string
+  read: boolean
+  createdAt: string
+  scope: NotificationScope
+  severity: NotificationSeverity
 }
 
-export type StudentDocumentStatus = "aguardando" | "validado" | "recusado"
+export type UserDocumentStatus = "aguardando" | "validado" | "recusado"
 
-export type StudentDocument = {
+export type UserDocument = {
   id: number
   name: string
   kind: "pdf" | "image"
-  dataUrl: string
-  status: StudentDocumentStatus
+  fileUrl: string
+  status: UserDocumentStatus
   uploadedAt: string
 }
 
-export type Student = {
+export type UserRole = "admin" | "student"
+
+export type User = {
   id: number
   name: string
   email: string
   password: string
-  enrolled: string
+  role: UserRole
+  enrolledAt: string
   status: string
   phone: string
   cpf?: string
-  matricula?: string
   courses: Record<number, boolean>
-  auditLog: AuditEntry[]
-  certificate?: CertificateFile
+  certificate?: Certificate
   progress?: Record<number, number[]>
-  notifications: NotificationItem[]
-  acknowledgedBroadcasts?: number[]
-  documents?: StudentDocument[]
+  notifications: Notification[]
+  documents?: UserDocument[]
 }
 
 export type ExamAttempt = {
   id: number
-  alunoId: number
+  userId: number
   courseId: number
-  contentId?: number
+  examId: number
   moduleId?: number
   title: string
-  type: "exame" | "atividade"
+  examType: ExamType
   answers: Record<number, string | number>
   scorePercent: number
   scorePoints?: number
@@ -163,19 +153,18 @@ export type ExamAttempt = {
 }
 
 type CombatState = {
-  listaAlunos: Student[]
+  listaAlunos: User[]
   listaCursos: Course[]
   bibliotecaArquivos: LibraryItem[]
   tentativasExames: ExamAttempt[]
-  quadroAvisos: BroadcastNotice[]
   currentUserId: number | null
-  currentRole: "admin" | "aluno" | null
+  currentRole: UserRole | null
 }
 
 type CombatContextValue = CombatState & {
-  currentUser: Student | null
-  cadastrarAluno: (data: Omit<Student, "id" | "auditLog" | "courses" | "documents" | "notifications" | "acknowledgedBroadcasts"> & { courses?: Record<number, boolean>; documents?: StudentDocument[] }) => void
-  login: (credenciais: { email: string; password: string }) => { ok: boolean; role: "admin" | "aluno" | null }
+  currentUser: User | null
+  cadastrarAluno: (data: Omit<User, "id" | "courses" | "documents" | "notifications" | "progress" | "certificate"> & { courses?: Record<number, boolean>; documents?: UserDocument[] }) => void
+  login: (credenciais: { email: string; password: string }) => { ok: boolean; role: UserRole | null }
   logout: () => void
   criarCurso: (payload: {
     code: string
@@ -186,7 +175,7 @@ type CombatContextValue = CombatState & {
     status?: "ativo" | "rascunho"
   }) => void
   liberarCurso: (alunoId: number, cursoId: number) => void
-  salvarConteudoPolimorfico: (cursoId: number, moduleId: number, item: ContentItem) => void
+  salvarConteudoPolimorfico: (cursoId: number, moduleId: number, item: Lesson | Exam) => void
   atualizarCurso: (curso: Course) => void
   lancarNota: (
     alunoId: number,
@@ -196,21 +185,21 @@ type CombatContextValue = CombatState & {
     scorePoints?: number,
     totalPoints?: number
   ) => void
-  uploadCertificadoExterno: (alunoId: number, arquivo: CertificateFile) => void
+  uploadCertificadoExterno: (alunoId: number, arquivo: Certificate) => void
   adicionarArquivoBiblioteca: (item: Omit<LibraryItem, "id" | "updatedAt">) => void
   atualizarArquivoBiblioteca: (itemId: number, patch: Partial<LibraryItem>) => void
   removerArquivoBiblioteca: (itemId: number) => void
-  atualizarAluno: (alunoId: number, patch: Partial<Student>) => void
-  adicionarDocumentoAluno: (alunoId: number, payload: Omit<StudentDocument, "id" | "status" | "uploadedAt"> & { status?: StudentDocumentStatus }) => void
-  validarDocumentoAluno: (alunoId: number, documentId: number, status: StudentDocumentStatus) => void
+  atualizarAluno: (alunoId: number, patch: Partial<User>) => void
+  adicionarDocumentoAluno: (alunoId: number, payload: Omit<UserDocument, "id" | "status" | "uploadedAt"> & { status?: UserDocumentStatus }) => void
+  validarDocumentoAluno: (alunoId: number, documentId: number, status: UserDocumentStatus) => void
   alterarSenhaAluno: (alunoId: number, senha: string) => void
   enviarMissao: (payload: {
     alunoId: number
     courseId: number
-    contentId?: number
+    examId: number
     moduleId?: number
     title: string
-    type: "exame" | "atividade"
+    examType: ExamType
     answers: Record<number, string | number>
     scorePercent: number
     scorePoints?: number
@@ -219,17 +208,18 @@ type CombatContextValue = CombatState & {
     maxAttempts?: number
     cutScore?: number
   }) => void
-  marcarAulaConcluida: (alunoId: number, cursoId: number, itemId: number) => void
-  criarAviso: (payload: { title: string; message: string; priority: BroadcastNotice["priority"] }) => void
+  marcarAulaConcluida: (alunoId: number, cursoId: number, lessonId: number) => void
+  criarAviso: (payload: { title: string; message: string; priority: NotificationSeverity }) => void
   addNotification: (payload: {
     alunoId: number
-    tipo: NotificationType
-    mensagem: string
-    rota: string
+    kind: NotificationKind
+    message: string
+    link: string
+    scope?: NotificationScope
+    severity?: NotificationSeverity
   }) => void
   markAsRead: (alunoId: number, notificationId: number) => void
   marcarNotificacaoLida: (alunoId: number, notificationId: number) => void
-  marcarAvisoCiente: (alunoId: number, noticeId: number) => void
 }
 
 const STORAGE_KEY = "cta_state_v1"
@@ -247,8 +237,7 @@ const buildInitialCourses = (): Course[] => {
     totalHours: "60h",
     status: "ativo",
     modules: [],
-    finalExam: null,
-    certificateConfig: base.certificateConfig
+    finalExam: null
   }
   const course3: Course = {
     id: 3,
@@ -259,13 +248,12 @@ const buildInitialCourses = (): Course[] => {
     totalHours: "40h",
     status: "ativo",
     modules: [],
-    finalExam: null,
-    certificateConfig: base.certificateConfig
+    finalExam: null
   }
   return [base, course2, course3]
 }
 
-const buildInitialStudents = (): Student[] => {
+const buildInitialStudents = (): User[] => {
   const today = "04/05/2026"
   return [
     {
@@ -273,16 +261,14 @@ const buildInitialStudents = (): Student[] => {
       name: "Joao Silva",
       email: "joao.silva@email.com",
       password: "aluno123",
-      enrolled: "15/01/2024",
+      role: "student",
+      enrolledAt: "15/01/2024",
       status: "ativo",
       phone: "(11) 99999-1234",
       cpf: "123.456.789-00",
-      matricula: "MAT-0001",
       courses: { 1: true, 2: true, 3: false },
-      auditLog: [{ id: 1, action: "Liberado por Admin", date: today, details: "CQC-001" }],
       progress: { 1: [] },
       notifications: [],
-      acknowledgedBroadcasts: [],
       documents: []
     },
     {
@@ -290,16 +276,14 @@ const buildInitialStudents = (): Student[] => {
       name: "Maria Santos",
       email: "maria.santos@email.com",
       password: "aluno123",
-      enrolled: "22/02/2024",
+      role: "student",
+      enrolledAt: "22/02/2024",
       status: "ativo",
       phone: "(11) 99999-5678",
       cpf: "987.654.321-00",
-      matricula: "MAT-0002",
       courses: { 1: true, 2: false, 3: false },
-      auditLog: [],
       progress: { 1: [] },
       notifications: [],
-      acknowledgedBroadcasts: [],
       documents: []
     }
   ]
@@ -310,17 +294,11 @@ const initialState: CombatState = {
   listaCursos: buildInitialCourses(),
   bibliotecaArquivos: initialLibraryItems,
   tentativasExames: [],
-  quadroAvisos: initialBroadcasts,
   currentUserId: null,
   currentRole: null
 }
 
-const normalizeBroadcastPriority = (
-  priority: BroadcastNotice["priority"] | string
-): BroadcastNotice["priority"] =>
-  priority === "critico" || priority === "informativo" ? priority : "informativo"
-
-const normalizeNotifications = (notifications: NotificationItem[] | undefined) => {
+const normalizeNotifications = (notifications: Notification[] | undefined) => {
   if (!notifications) return []
   return notifications.map((item) => {
     const legacy = item as unknown as {
@@ -330,53 +308,82 @@ const normalizeNotifications = (notifications: NotificationItem[] | undefined) =
       message?: string
       createdAt?: string
       read?: boolean
-      tipo?: NotificationType
+      tipo?: string
       mensagem?: string
       rota?: string
       lida?: boolean
       timestamp?: string
+      scope?: NotificationScope
+      severity?: NotificationSeverity
+      link?: string
     }
-    const tipo =
-      legacy.tipo ||
-      (legacy.kind === "correcao"
-        ? "ATIVIDADE_CORRIGIDA"
-        : "BROADCAST_GERAL")
+    const kind =
+      (legacy.kind as NotificationKind | undefined) ||
+      (legacy.tipo === "AULA_NOVA"
+        ? "LESSON_NEW"
+        : legacy.tipo === "NOVA_ATIVIDADE"
+          ? "EXAM_AVAILABLE"
+          : legacy.tipo === "ATIVIDADE_CORRIGIDA"
+            ? "EXAM_GRADED"
+            : legacy.tipo === "BROADCAST_GERAL"
+              ? "GLOBAL_ALERT"
+              : "GLOBAL_ALERT")
     return {
       id: legacy.id ?? 0,
-      tipo,
-      mensagem: legacy.mensagem ?? legacy.message ?? legacy.title ?? "Atualizacao disponivel",
-      rota: legacy.rota ?? "/dashboard",
-      lida: legacy.lida ?? legacy.read ?? false,
-      timestamp: legacy.timestamp ?? legacy.createdAt ?? new Date().toLocaleString("pt-BR")
+      kind,
+      title: legacy.title,
+      message: legacy.mensagem ?? legacy.message ?? legacy.title ?? "Atualizacao disponivel",
+      link: legacy.link ?? legacy.rota ?? "/dashboard",
+      read: legacy.lida ?? legacy.read ?? false,
+      createdAt: legacy.timestamp ?? legacy.createdAt ?? new Date().toLocaleString("pt-BR"),
+      scope:
+        legacy.scope ?? (kind === "GLOBAL_ALERT" ? "global" : "user"),
+      severity: legacy.severity ?? "info"
     }
   })
 }
 
-const normalizeState = (state: CombatState): CombatState => ({
-  ...state,
-  listaAlunos: state.listaAlunos.map((student) => ({
-    ...student,
-    auditLog: student.auditLog ?? [],
-    courses: student.courses ?? {},
-    progress: student.progress ?? {},
-    notifications: normalizeNotifications(student.notifications),
-    acknowledgedBroadcasts: student.acknowledgedBroadcasts ?? [],
-    cpf: student.cpf ?? "",
-    matricula: student.matricula ?? "",
-    documents: student.documents ?? []
-  })),
-  tentativasExames: state.tentativasExames.map((attempt) => ({
-    ...attempt,
-    maxAttempts: attempt.maxAttempts,
-    cutScore: attempt.cutScore,
-    scorePoints: attempt.scorePoints ?? undefined,
-    totalPoints: attempt.totalPoints ?? undefined
-  })),
-  quadroAvisos: state.quadroAvisos.map((notice) => ({
-    ...notice,
-    priority: normalizeBroadcastPriority(notice.priority)
-  }))
-})
+const normalizeState = (state: CombatState): CombatState => {
+  const fallbackCourseId = state.listaCursos[0]?.id ?? 0
+  return {
+    ...state,
+    listaAlunos: state.listaAlunos.map((student) => {
+      const legacyCertificate = student.certificate as
+        | Certificate
+        | { name?: string; dataUrl?: string; courseId?: number }
+        | undefined
+      const certificate = legacyCertificate
+        ? {
+            id: (legacyCertificate as Certificate).id ?? student.id,
+            userId: student.id,
+            courseId: legacyCertificate.courseId ?? fallbackCourseId,
+            fileUrl: legacyCertificate.fileUrl ?? legacyCertificate.dataUrl ?? ""
+          }
+        : undefined
+      return {
+        ...student,
+        role: student.role ?? "student",
+        enrolledAt: student.enrolledAt ?? (student as unknown as { enrolled?: string }).enrolled ?? "",
+        courses: student.courses ?? {},
+        progress: student.progress ?? {},
+        notifications: normalizeNotifications(student.notifications),
+        cpf: student.cpf ?? "",
+        certificate,
+        documents: (student.documents ?? []).map((doc) => ({
+          ...doc,
+          fileUrl: (doc as unknown as { dataUrl?: string }).dataUrl ?? doc.fileUrl
+        }))
+      }
+    }),
+    tentativasExames: state.tentativasExames.map((attempt) => ({
+      ...attempt,
+      maxAttempts: attempt.maxAttempts,
+      cutScore: attempt.cutScore,
+      scorePoints: attempt.scorePoints ?? undefined,
+      totalPoints: attempt.totalPoints ?? undefined
+    }))
+  }
+}
 
 const CombatContext = createContext<CombatContextValue | null>(null)
 
@@ -412,18 +419,24 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
   )
 
   const pushNotification = (
-    existing: NotificationItem[],
-    payload: Omit<NotificationItem, "id" | "lida" | "timestamp"> & { timestamp?: string }
+    existing: Notification[],
+    payload: Omit<Notification, "id" | "read" | "createdAt"> & {
+      createdAt?: string
+      id?: number
+    }
   ) => {
-    const nextId = Math.max(0, ...existing.map((item) => item.id)) + 1
+    const nextId = payload.id ?? Math.max(0, ...existing.map((item) => item.id)) + 1
     return [
       {
         id: nextId,
-        tipo: payload.tipo,
-        mensagem: payload.mensagem,
-        rota: payload.rota,
-        lida: false,
-        timestamp: payload.timestamp ?? new Date().toLocaleString("pt-BR")
+        kind: payload.kind,
+        title: payload.title,
+        message: payload.message,
+        link: payload.link,
+        read: false,
+        createdAt: payload.createdAt ?? new Date().toLocaleString("pt-BR"),
+        scope: payload.scope,
+        severity: payload.severity
       },
       ...existing
     ]
@@ -432,23 +445,20 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
   const cadastrarAluno: CombatContextValue["cadastrarAluno"] = (data) => {
     setState((prev) => {
       const nextId = Math.max(0, ...prev.listaAlunos.map((student) => student.id)) + 1
-      const matricula = data.matricula || `MAT-${String(nextId).padStart(4, "0")}`
-      const novoAluno: Student = {
+      const novoAluno: User = {
         id: nextId,
         name: data.name,
         email: data.email,
         password: data.password,
-        enrolled: data.enrolled,
+        role: data.role ?? "student",
+        enrolledAt: data.enrolledAt,
         status: data.status,
         phone: data.phone,
         cpf: data.cpf ?? "",
-        matricula,
         courses: data.courses ?? {},
-        auditLog: [],
         certificate: undefined,
         progress: {},
         notifications: [],
-        acknowledgedBroadcasts: [],
         documents: data.documents ?? []
       }
       return { ...prev, listaAlunos: [...prev.listaAlunos, novoAluno] }
@@ -464,8 +474,8 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
     const found = state.listaAlunos.find((student) => student.email === email && student.password === password)
     if (!found) return { ok: false, role: null }
 
-    setState((prev) => ({ ...prev, currentUserId: found.id, currentRole: "aluno" }))
-    return { ok: true, role: "aluno" }
+    setState((prev) => ({ ...prev, currentUserId: found.id, currentRole: found.role }))
+    return { ok: true, role: found.role }
   }
 
   const logout = () => {
@@ -475,8 +485,6 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
   const criarCurso: CombatContextValue["criarCurso"] = (payload) => {
     setState((prev) => {
       const nextId = Math.max(0, ...prev.listaCursos.map((course) => course.id)) + 1
-      const template =
-        prev.listaCursos[0]?.certificateConfig || (courseMock as Course).certificateConfig
       const nextCourse: Course = {
         id: nextId,
         code: payload.code.toUpperCase(),
@@ -486,35 +494,20 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
         totalHours: payload.totalHours || "0h",
         status: payload.status ?? "rascunho",
         modules: [],
-        finalExam: null,
-        certificateConfig: {
-          ...template,
-          signers: template.signers.map((signer) => ({ ...signer }))
-        }
+        finalExam: null
       }
       return { ...prev, listaCursos: [...prev.listaCursos, nextCourse] }
     })
   }
 
   const liberarCurso: CombatContextValue["liberarCurso"] = (alunoId, cursoId) => {
-    const date = new Date().toLocaleDateString("pt-BR")
     setState((prev) => ({
       ...prev,
       listaAlunos: prev.listaAlunos.map((student) => {
         if (student.id !== alunoId) return student
-        const auditId = Math.max(0, ...student.auditLog.map((entry) => entry.id)) + 1
         return {
           ...student,
-          courses: { ...student.courses, [cursoId]: !student.courses[cursoId] },
-          auditLog: [
-            ...student.auditLog,
-            {
-              id: auditId,
-              action: student.courses[cursoId] ? "Bloqueado por Admin" : "Liberado por Admin",
-              date,
-              details: String(cursoId)
-            }
-          ]
+          courses: { ...student.courses, [cursoId]: !student.courses[cursoId] }
         }
       })
     }))
@@ -533,18 +526,31 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
           ...course,
           modules: course.modules.map((module) => {
             if (module.id !== moduleId) return module
-            return { ...module, items: [...module.items, item] }
+            if (item.type === "activity") {
+              return { ...module, exams: [...module.exams, item] }
+            }
+            return { ...module, lessons: [...module.lessons, item] }
           })
         }
       })
     }))
   }
 
-  const buildCourseItemIndex = (course: Course) => {
-    const map = new Map<number, { moduleId: number; item: ContentItem }>()
+  const buildCourseLessonIndex = (course: Course) => {
+    const map = new Map<number, { moduleId: number; lesson: Lesson }>()
     course.modules.forEach((module) => {
-      module.items.forEach((item) => {
-        map.set(item.id, { moduleId: module.id, item })
+      module.lessons.forEach((lesson) => {
+        map.set(lesson.id, { moduleId: module.id, lesson })
+      })
+    })
+    return map
+  }
+
+  const buildCourseExamIndex = (course: Course) => {
+    const map = new Map<number, { moduleId: number; exam: Exam }>()
+    course.modules.forEach((module) => {
+      module.exams.forEach((exam) => {
+        map.set(exam.id, { moduleId: module.id, exam })
       })
     })
     return map
@@ -561,18 +567,27 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, listaCursos: nextCourses }
       }
 
-      const previousItems = buildCourseItemIndex(previousCourse)
-      const nextItems = buildCourseItemIndex(curso)
-      const addedItems: Array<{ moduleId: number; item: ContentItem }> = []
-      nextItems.forEach((value, key) => {
-        if (!previousItems.has(key)) {
-          addedItems.push(value)
+      const previousLessons = buildCourseLessonIndex(previousCourse)
+      const nextLessons = buildCourseLessonIndex(curso)
+      const addedLessons: Array<{ moduleId: number; lesson: Lesson }> = []
+      nextLessons.forEach((value, key) => {
+        if (!previousLessons.has(key)) {
+          addedLessons.push(value)
+        }
+      })
+
+      const previousExams = buildCourseExamIndex(previousCourse)
+      const nextExams = buildCourseExamIndex(curso)
+      const addedExams: Array<{ moduleId: number; exam: Exam }> = []
+      nextExams.forEach((value, key) => {
+        if (!previousExams.has(key)) {
+          addedExams.push(value)
         }
       })
 
       const addedFinalExam = !previousCourse.finalExam && curso.finalExam
 
-      if (!addedItems.length && !addedFinalExam) {
+      if (!addedLessons.length && !addedExams.length && !addedFinalExam) {
         return { ...prev, listaCursos: nextCourses }
       }
 
@@ -583,21 +598,33 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
           if (!student.courses?.[curso.id]) return student
           let nextNotifications = student.notifications ?? []
 
-          addedItems.forEach(({ moduleId, item }) => {
-            const tipo = item.type === "activity" ? "NOVA_ATIVIDADE" : "AULA_NOVA"
-            const mensagem =
-              item.type === "activity"
-                ? `Nova atividade liberada: ${item.title}`
-                : `Novo conteudo liberado: ${item.title}`
-            const rota = `/curso/${curso.id}?moduleId=${moduleId}&itemId=${item.id}`
-            nextNotifications = pushNotification(nextNotifications, { tipo, mensagem, rota })
+          addedLessons.forEach(({ moduleId, lesson }) => {
+            nextNotifications = pushNotification(nextNotifications, {
+              kind: "LESSON_NEW",
+              message: `Nova aula liberada: ${lesson.title}`,
+              link: `/curso/${curso.id}?moduleId=${moduleId}&lessonId=${lesson.id}`,
+              scope: "user",
+              severity: "info"
+            })
+          })
+
+          addedExams.forEach(({ moduleId, exam }) => {
+            nextNotifications = pushNotification(nextNotifications, {
+              kind: "EXAM_AVAILABLE",
+              message: `Nova atividade liberada: ${exam.title}`,
+              link: `/curso/${curso.id}/missao?type=activity&moduleId=${moduleId}&examId=${exam.id}`,
+              scope: "user",
+              severity: "info"
+            })
           })
 
           if (addedFinalExam) {
             nextNotifications = pushNotification(nextNotifications, {
-              tipo: "NOVA_ATIVIDADE",
-              mensagem: "Missao de certificacao disponivel. Exame final liberado.",
-              rota: `/curso/${curso.id}/missao?type=final`
+              kind: "EXAM_AVAILABLE",
+              message: "Exame final liberado.",
+              link: `/curso/${curso.id}/missao?type=final`,
+              scope: "user",
+              severity: "info"
             })
           }
 
@@ -645,9 +672,11 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
         listaAlunos: prev.listaAlunos.map((student) => {
           if (student.id !== alunoId) return student
           const notifications = pushNotification(student.notifications ?? [], {
-            tipo: "ATIVIDADE_CORRIGIDA",
-            mensagem: `Sua atividade foi corrigida com nota ${resolvedPercent}%.`,
-            rota: `/dashboard?section=atividades&attemptId=${exameId}`
+            kind: "EXAM_GRADED",
+            message: `Sua atividade foi corrigida com nota ${resolvedPercent}%.`,
+            link: `/dashboard?section=atividades&attemptId=${exameId}`,
+            scope: "user",
+            severity: "info"
           })
           return {
             ...student,
@@ -672,9 +701,12 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
               status: "certificado",
               certificate: arquivo,
               notifications: pushNotification(student.notifications ?? [], {
-                tipo: "BROADCAST_GERAL",
-                mensagem: "Seu certificado foi liberado para download.",
-                rota: "/dashboard?section=notas"
+                kind: "GLOBAL_ALERT",
+                title: "Certificado",
+                message: "Seu certificado foi liberado para download.",
+                link: "/dashboard?section=notas",
+                scope: "user",
+                severity: "info"
               })
             }
           : student
@@ -734,9 +766,7 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
           documents: safePatch.documents ?? student.documents,
           courses: safePatch.courses ?? student.courses,
           progress: safePatch.progress ?? student.progress,
-          notifications: safePatch.notifications ?? student.notifications,
-          acknowledgedBroadcasts:
-            safePatch.acknowledgedBroadcasts ?? student.acknowledgedBroadcasts
+          notifications: safePatch.notifications ?? student.notifications
         }
       })
     }))
@@ -752,11 +782,11 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
         if (student.id !== alunoId) return student
         const existing = student.documents ?? []
         const nextId = Math.max(0, ...existing.map((doc) => doc.id)) + 1
-        const nextDoc: StudentDocument = {
+        const nextDoc: UserDocument = {
           id: nextId,
           name: payload.name,
           kind: payload.kind,
-          dataUrl: payload.dataUrl,
+          fileUrl: payload.fileUrl,
           status: payload.status ?? "aguardando",
           uploadedAt: new Date().toLocaleDateString("pt-BR")
         }
@@ -773,25 +803,17 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
     documentId,
     status
   ) => {
-    const date = new Date().toLocaleDateString("pt-BR")
     setState((prev) => ({
       ...prev,
       listaAlunos: prev.listaAlunos.map((student) => {
         if (student.id !== alunoId) return student
         const documents = student.documents ?? []
-        const target = documents.find((doc) => doc.id === documentId)
         const nextDocuments = documents.map((doc) =>
           doc.id === documentId ? { ...doc, status } : doc
         )
-        const nextAuditId = Math.max(0, ...student.auditLog.map((entry) => entry.id)) + 1
-        const statusLabel = status === "validado" ? "validado" : "recusado"
-        const action = target
-          ? `Documento ${target.name} ${statusLabel} por Admin`
-          : `Documento ${documentId} ${statusLabel} por Admin`
         return {
           ...student,
-          documents: nextDocuments,
-          auditLog: [...student.auditLog, { id: nextAuditId, action, date }]
+          documents: nextDocuments
         }
       })
     }))
@@ -809,10 +831,10 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
   const enviarMissao: CombatContextValue["enviarMissao"] = ({
     alunoId,
     courseId,
-    contentId,
+    examId,
     moduleId,
     title,
-    type,
+    examType,
     answers,
     scorePercent,
     scorePoints,
@@ -826,10 +848,10 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
       const passed = cutScore ? scorePercent >= cutScore : scorePercent >= 70
       const attemptsUsed = prev.tentativasExames.filter(
         (attempt) =>
-          attempt.alunoId === alunoId &&
+          attempt.userId === alunoId &&
           attempt.courseId === courseId &&
-          attempt.type === type &&
-          attempt.contentId === contentId
+          attempt.examType === examType &&
+          attempt.examId === examId
       ).length
       if (maxAttempts && attemptsUsed >= maxAttempts) {
         return {
@@ -839,9 +861,12 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
               ? {
                   ...student,
                   notifications: pushNotification(student.notifications ?? [], {
-                    tipo: "BROADCAST_GERAL",
-                    mensagem: "Limite de tentativas atingido. Contate o instrutor.",
-                    rota: "/dashboard?section=atividades"
+                    kind: "GLOBAL_ALERT",
+                    title: "Tentativas esgotadas",
+                    message: "Limite de tentativas atingido. Contate o instrutor.",
+                    link: "/dashboard?section=atividades",
+                    scope: "user",
+                    severity: "critical"
                   })
                 }
               : student
@@ -856,12 +881,12 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
             : undefined
       const attempt: ExamAttempt = {
         id: nextId,
-        alunoId,
+        userId: alunoId,
         courseId,
-        contentId,
+        examId,
         moduleId,
         title,
-        type,
+        examType,
         answers,
         scorePercent,
         scorePoints: resolvedScorePoints,
@@ -883,13 +908,16 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
                 ...student,
                 status: passed && !hasEssay ? "apto" : student.status,
                 notifications: pushNotification(student.notifications ?? [], {
-                  tipo: "BROADCAST_GERAL",
-                  mensagem: hasEssay
+                  kind: "GLOBAL_ALERT",
+                  title: "Missao enviada",
+                  message: hasEssay
                     ? "Sua missao foi enviada. Avaliacao pendente."
                     : passed
                       ? "Missao concluida com sucesso."
                       : "Missao enviada. Resultado abaixo do minimo.",
-                  rota: `/dashboard?section=atividades&attemptId=${nextId}`
+                  link: `/dashboard?section=atividades&attemptId=${nextId}`,
+                  scope: "user",
+                  severity: passed ? "info" : "critical"
                 })
               }
             : student
@@ -901,19 +929,19 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
   const marcarAulaConcluida: CombatContextValue["marcarAulaConcluida"] = (
     alunoId,
     cursoId,
-    itemId
+    lessonId
   ) => {
     setState((prev) => ({
       ...prev,
       listaAlunos: prev.listaAlunos.map((student) => {
         if (student.id !== alunoId) return student
         const current = student.progress?.[cursoId] || []
-        if (current.includes(itemId)) return student
+        if (current.includes(lessonId)) return student
         return {
           ...student,
           progress: {
             ...student.progress,
-            [cursoId]: [...current, itemId]
+            [cursoId]: [...current, lessonId]
           }
         }
       })
@@ -922,26 +950,24 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
 
   const criarAviso: CombatContextValue["criarAviso"] = ({ title, message, priority }) => {
     setState((prev) => {
-      const nextId = Math.max(0, ...prev.quadroAvisos.map((notice) => notice.id)) + 1
+      const nextId = Math.max(
+        0,
+        ...prev.listaAlunos.flatMap((student) =>
+          (student.notifications ?? []).map((item) => item.id)
+        )
+      ) + 1
       return {
         ...prev,
-        quadroAvisos: [
-          {
-            id: nextId,
-            title,
-            message,
-            priority,
-            author: "Comando Central",
-            createdAt: new Date().toLocaleDateString("pt-BR")
-          },
-          ...prev.quadroAvisos
-        ],
         listaAlunos: prev.listaAlunos.map((student) => ({
           ...student,
           notifications: pushNotification(student.notifications ?? [], {
-            tipo: "BROADCAST_GERAL",
-            mensagem: message,
-            rota: "/dashboard"
+            id: nextId,
+            kind: "GLOBAL_ALERT",
+            title,
+            message,
+            link: "/dashboard",
+            scope: "global",
+            severity: priority
           })
         }))
       }
@@ -950,9 +976,11 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
 
   const addNotification: CombatContextValue["addNotification"] = ({
     alunoId,
-    tipo,
-    mensagem,
-    rota
+    kind,
+    message,
+    link,
+    scope,
+    severity
   }) => {
     setState((prev) => ({
       ...prev,
@@ -961,9 +989,11 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...student,
               notifications: pushNotification(student.notifications ?? [], {
-                tipo,
-                mensagem,
-                rota
+                kind,
+                message,
+                link,
+                scope: scope ?? "user",
+                severity: severity ?? "info"
               })
             }
           : student
@@ -982,7 +1012,7 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
         return {
           ...student,
           notifications: student.notifications.map((item) =>
-            item.id === notificationId ? { ...item, lida: true } : item
+            item.id === notificationId ? { ...item, read: true } : item
           )
         }
       })
@@ -994,24 +1024,6 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
     notificationId
   ) => {
     markAsRead(alunoId, notificationId)
-  }
-
-  const marcarAvisoCiente: CombatContextValue["marcarAvisoCiente"] = (
-    alunoId,
-    noticeId
-  ) => {
-    setState((prev) => ({
-      ...prev,
-      listaAlunos: prev.listaAlunos.map((student) => {
-        if (student.id !== alunoId) return student
-        const acknowledged = student.acknowledgedBroadcasts ?? []
-        if (acknowledged.includes(noticeId)) return student
-        return {
-          ...student,
-          acknowledgedBroadcasts: [...acknowledged, noticeId]
-        }
-      })
-    }))
   }
 
   const value = useMemo<CombatContextValue>(

@@ -22,8 +22,8 @@ import {
 import {
   useCombatContext,
   type Course,
-  type ContentItem,
-  type ContentType,
+  type Lesson,
+  type Exam,
   type MaterialAttachment,
   type Question,
   type QuestionType
@@ -35,13 +35,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/admin/rich-text-editor"
 import type { LibraryItem } from "@/lib/admin-library"
 
-type CertificateSigner = {
-  id: number
-  name: string
-  role: string
-}
-
 type MaterialKind = MaterialAttachment["kind"]
+type ContentKind = "video" | "material" | "activity"
 
 export default function AdminCourseDetailPage() {
   const router = useRouter()
@@ -49,14 +44,16 @@ export default function AdminCourseDetailPage() {
   const { listaCursos, bibliotecaArquivos, atualizarCurso } = useCombatContext()
   const courseId = Number(params.id)
   const course = listaCursos.find((item) => item.id === courseId) || listaCursos[0]
-  const [activeTab, setActiveTab] = useState<"conteudo" | "certificado">("conteudo")
   const [showAddModuleModal, setShowAddModuleModal] = useState(false)
   const [showAddContentModal, setShowAddContentModal] = useState(false)
   const [showFinalExamModal, setShowFinalExamModal] = useState(false)
   const [selectedModuleId, setSelectedModuleId] = useState<number | null>(null)
+  const [expandedModules, setExpandedModules] = useState<Record<number, boolean>>(() =>
+    course?.modules?.length ? { [course.modules[0].id]: true } : {}
+  )
   
   const [newModule, setNewModule] = useState({ name: "", description: "" })
-  const [newContentType, setNewContentType] = useState<ContentType>("video")
+  const [newContentType, setNewContentType] = useState<ContentKind>("video")
   const [newContent, setNewContent] = useState({
     title: "",
     videoId: "",
@@ -70,7 +67,7 @@ export default function AdminCourseDetailPage() {
   const [newQuestions, setNewQuestions] = useState<Question[]>([])
   const [newMaterials, setNewMaterials] = useState<MaterialAttachment[]>([])
   const [newFinalExam, setNewFinalExam] = useState({
-    title: "Exame Final de Certificação",
+    title: "Exame Final do Curso",
     cutScore: 70,
     durationMinutes: 60,
     drawCount: 10,
@@ -224,47 +221,6 @@ export default function AdminCourseDetailPage() {
     atualizarCurso(updater(course))
   }
 
-  const addSigner = () => {
-    updateCourse((prev) => ({
-      ...prev,
-      certificateConfig: {
-        ...prev.certificateConfig,
-        signers: [
-          ...prev.certificateConfig.signers,
-          {
-            id: getNextId(prev.certificateConfig.signers),
-            name: "",
-            role: ""
-          }
-        ]
-      }
-    }))
-  }
-
-  const updateSigner = (signerId: number, patch: Partial<CertificateSigner>) => {
-    updateCourse((prev) => ({
-      ...prev,
-      certificateConfig: {
-        ...prev.certificateConfig,
-        signers: prev.certificateConfig.signers.map((signer) =>
-          signer.id === signerId ? { ...signer, ...patch } : signer
-        )
-      }
-    }))
-  }
-
-  const removeSigner = (signerId: number) => {
-    updateCourse((prev) => ({
-      ...prev,
-      certificateConfig: {
-        ...prev.certificateConfig,
-        signers: prev.certificateConfig.signers.filter(
-          (signer) => signer.id !== signerId
-        )
-      }
-    }))
-  }
-
   const applyLibraryToMaterial = (item: LibraryItem) => {
     if (item.type === "pdf") {
       setNewContent((prev) => ({ ...prev, materialPdfUrl: item.url }))
@@ -313,11 +269,9 @@ export default function AdminCourseDetailPage() {
   }
 
   const toggleModule = (moduleId: number) => {
-    updateCourse((prev) => ({
+    setExpandedModules((prev) => ({
       ...prev,
-      modules: prev.modules.map((module) =>
-        module.id === moduleId ? { ...module, isExpanded: !module.isExpanded } : module
-      )
+      [moduleId]: !prev[moduleId]
     }))
   }
 
@@ -333,12 +287,13 @@ export default function AdminCourseDetailPage() {
               id: newId,
               name: newModule.name,
               description: newModule.description,
-              items: [],
-              isExpanded: true
+              lessons: [],
+              exams: []
             }
           ]
         }
       })
+      setExpandedModules((prev) => ({ ...prev, [newId]: true }))
       setNewModule({ name: "", description: "" })
       setShowAddModuleModal(false)
     }
@@ -363,8 +318,9 @@ export default function AdminCourseDetailPage() {
           return module
         }
 
-        const newItemId = getNextId(module.items)
-        let newItem: ContentItem
+        const combined = [...module.lessons, ...module.exams]
+        const newItemId = getNextId(combined)
+        let newItem: Lesson | Exam
 
         if (newContentType === "video") {
           newItem = {
@@ -400,6 +356,8 @@ export default function AdminCourseDetailPage() {
             id: newItemId,
             type: "activity",
             title: newContent.title,
+            courseId: prev.id,
+            moduleId: module.id,
             drawCount: newActivityDrawCount,
             attemptLimit: newActivityAttemptLimit,
             totalPoints: newActivityTotalPoints,
@@ -412,7 +370,14 @@ export default function AdminCourseDetailPage() {
 
         return {
           ...module,
-          items: [...module.items, newItem]
+          lessons:
+            newItem.type === "video" || newItem.type === "material"
+              ? [...module.lessons, newItem]
+              : module.lessons,
+          exams:
+            newItem.type === "activity"
+              ? [...module.exams, newItem]
+              : module.exams
         }
       })
     }))
@@ -428,7 +393,7 @@ export default function AdminCourseDetailPage() {
     }))
   }
 
-  const handleDeleteItem = (moduleId: number, itemId: number) => {
+  const handleDeleteItem = (moduleId: number, itemId: number, kind: "lesson" | "exam") => {
     updateCourse((prev) => ({
       ...prev,
       modules: prev.modules.map((module) => {
@@ -438,7 +403,14 @@ export default function AdminCourseDetailPage() {
 
         return {
           ...module,
-          items: module.items.filter((item) => item.id !== itemId)
+          lessons:
+            kind === "lesson"
+              ? module.lessons.filter((item) => item.id !== itemId)
+              : module.lessons,
+          exams:
+            kind === "exam"
+              ? module.exams.filter((item) => item.id !== itemId)
+              : module.exams
         }
       })
     }))
@@ -454,8 +426,8 @@ export default function AdminCourseDetailPage() {
     if (course.finalExam) {
       setNewFinalExam({
         title: course.finalExam.title,
-        cutScore: course.finalExam.cutScore,
-        durationMinutes: course.finalExam.durationMinutes,
+        cutScore: course.finalExam.cutScore ?? 70,
+        durationMinutes: course.finalExam.durationMinutes ?? 60,
         drawCount: course.finalExam.drawCount,
         attemptLimit: course.finalExam.attemptLimit,
         totalPoints: course.finalExam.totalPoints ?? 2
@@ -463,7 +435,7 @@ export default function AdminCourseDetailPage() {
       setFinalExamQuestions(course.finalExam.questions)
     } else {
       setNewFinalExam({
-        title: "Exame Final de Certificação",
+        title: "Exame Final do Curso",
         cutScore: 70,
         durationMinutes: 60,
         drawCount: 10,
@@ -493,6 +465,8 @@ export default function AdminCourseDetailPage() {
       finalExam: {
         id: prev.finalExam?.id ?? 1,
         title: newFinalExam.title,
+        type: "final",
+        courseId: prev.id,
         cutScore: newFinalExam.cutScore,
         durationMinutes: newFinalExam.durationMinutes,
         drawCount: newFinalExam.drawCount,
@@ -514,7 +488,7 @@ export default function AdminCourseDetailPage() {
     }))
   }
 
-  const getContentIcon = (type: ContentType) => {
+  const getContentIcon = (type: ContentKind) => {
     switch (type) {
       case "video":
         return <Play className="h-3 w-3" />
@@ -527,7 +501,7 @@ export default function AdminCourseDetailPage() {
     }
   }
 
-  const getContentLabel = (type: ContentType) => {
+  const getContentLabel = (type: ContentKind) => {
     switch (type) {
       case "video":
         return "Vídeo"
@@ -551,7 +525,10 @@ export default function AdminCourseDetailPage() {
     }))
   }
 
-  const totalItems = course.modules.reduce((acc, module) => acc + module.items.length, 0)
+  const totalItems = course.modules.reduce(
+    (acc, module) => acc + module.lessons.length + module.exams.length,
+    0
+  )
   const isContentValid =
     newContent.title &&
     (newContentType === "video"
@@ -787,32 +764,7 @@ export default function AdminCourseDetailPage() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex flex-wrap gap-2 mb-6 border-b border-border sm:gap-4">
-          <button
-            onClick={() => setActiveTab("conteudo")}
-            className={`pb-3 text-xs uppercase tracking-wider transition-colors sm:text-sm ${
-              activeTab === "conteudo"
-                ? "text-[#F4511E] border-b-2 border-[#F4511E]"
-                : "text-[#6b7a5f] hover:text-foreground"
-            }`}
-          >
-            Conteudo e Avaliacoes
-          </button>
-          <button
-            onClick={() => setActiveTab("certificado")}
-            className={`pb-3 text-xs uppercase tracking-wider transition-colors sm:text-sm ${
-              activeTab === "certificado"
-                ? "text-[#F4511E] border-b-2 border-[#F4511E]"
-                : "text-[#6b7a5f] hover:text-foreground"
-            }`}
-          >
-            Certificado
-          </button>
-        </div>
-
-        {activeTab === "conteudo" && (
-          <>
+        <>
             <div className="border border-border bg-card p-4 mb-6">
               <RichTextEditor
                 label="Manual tatico"
@@ -852,7 +804,9 @@ export default function AdminCourseDetailPage() {
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-bold text-foreground">{module.name}</h3>
-                    <p className="text-xs text-[#6b7a5f]">{module.items.length} conteúdos</p>
+                    <p className="text-xs text-[#6b7a5f]">
+                      {module.lessons.length + module.exams.length} conteúdos
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -865,7 +819,7 @@ export default function AdminCourseDetailPage() {
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
-                  {module.isExpanded ? (
+                  {expandedModules[module.id] ? (
                     <ChevronUp className="h-5 w-5 text-[#6b7a5f]" />
                   ) : (
                     <ChevronDown className="h-5 w-5 text-[#6b7a5f]" />
@@ -874,128 +828,133 @@ export default function AdminCourseDetailPage() {
               </div>
 
               {/* Module Content - Items */}
-              {module.isExpanded && (
+              {expandedModules[module.id] && (
                 <div className="border-t border-border">
-                  {module.items.length === 0 && (
+                  {module.lessons.length === 0 && module.exams.length === 0 && (
                     <div className="p-4 text-xs text-[#6b7a5f]">
                       Nenhum conteúdo cadastrado neste módulo.
                     </div>
                   )}
-
-                  {module.items.map((item, itemIndex) => (
-                    <div key={item.id} className="border-b border-border last:border-b-0">
-                      <div className="flex flex-col justify-between gap-3 p-4 bg-secondary/20 sm:flex-row sm:items-start">
-                        <div className="flex items-start gap-3 min-w-0 flex-1">
-                          <div className="flex h-6 w-6 items-center justify-center border border-[#6b7a5f] text-xs font-medium text-[#6b7a5f] mt-0.5">
-                            {itemIndex + 1}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="flex items-center gap-1 text-xs text-[#F4511E] uppercase tracking-wider">
-                                {getContentIcon(item.type)}
-                                {getContentLabel(item.type)}
-                              </span>
-                              <h4 className="font-medium text-foreground text-sm break-words">
-                                {item.title}
-                              </h4>
+                  {[...module.lessons.map((lesson) => ({ kind: "lesson" as const, data: lesson })),
+                    ...module.exams.map((exam) => ({ kind: "exam" as const, data: exam }))
+                  ].map((entry, itemIndex) => {
+                    const item = entry.data
+                    const itemType = entry.kind === "lesson" ? item.type : "activity"
+                    return (
+                      <div key={`${entry.kind}-${item.id}`} className="border-b border-border last:border-b-0">
+                        <div className="flex flex-col justify-between gap-3 p-4 bg-secondary/20 sm:flex-row sm:items-start">
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                            <div className="flex h-6 w-6 items-center justify-center border border-[#6b7a5f] text-xs font-medium text-[#6b7a5f] mt-0.5">
+                              {itemIndex + 1}
                             </div>
-
-                            {item.type === "video" && (
-                              <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-[#6b7a5f]">
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  {item.duration || "Sem duração"}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="flex items-center gap-1 text-xs text-[#F4511E] uppercase tracking-wider">
+                                  {getContentIcon(itemType)}
+                                  {getContentLabel(itemType)}
                                 </span>
-                                <span className="flex items-center gap-1 break-all">
-                                  <Play className="h-3 w-3" />
-                                  {item.videoId ? `YouTube ID: ${item.videoId}` : "YouTube ID não informado"}
-                                </span>
+                                <h4 className="font-medium text-foreground text-sm break-words">
+                                  {item.title}
+                                </h4>
                               </div>
-                            )}
 
-                            {item.type === "video" && item.materials && item.materials.length > 0 && (
-                              <div className="mt-2 space-y-1 text-xs text-[#6b7a5f]">
-                                <span className="text-[10px] uppercase tracking-wider text-[#6b7a5f]">
-                                  Materiais da aula
-                                </span>
-                                <div className="flex flex-wrap gap-2">
-                                  {item.materials.map((attachment) => (
-                                    <div
-                                      key={attachment.id}
-                                      className="flex items-center gap-2 px-2 py-1 bg-secondary border border-border"
-                                    >
-                                      <FileText className="h-3 w-3" />
-                                      <span className="break-words">
-                                        {attachment.name} ({attachment.kind})
-                                      </span>
-                                      <span className="break-all text-[#F4511E]">
-                                        {attachment.url}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {item.type === "material" && (
-                              <div className="mt-2 space-y-1 text-xs text-[#6b7a5f]">
-                                <div className="flex flex-wrap items-center gap-2 break-all">
-                                  <FileText className="h-3 w-3" />
-                                  <span>
-                                    {item.materialPdfUrl
-                                      ? `PDF: ${item.materialPdfUrl}`
-                                      : "PDF não informado"}
+                              {entry.kind === "lesson" && item.type === "video" && (
+                                <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-[#6b7a5f]">
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    {item.duration || "Sem duração"}
                                   </span>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2 break-all">
-                                  <LinkIcon className="h-3 w-3" />
-                                  <span>
-                                    {item.materialLinkUrl
-                                      ? `Link: ${item.materialLinkUrl}`
-                                      : "Link não informado"}
-                                  </span>
-                                </div>
-                                {item.videoId && (
-                                  <div className="flex flex-wrap items-center gap-2 break-all">
+                                  <span className="flex items-center gap-1 break-all">
                                     <Play className="h-3 w-3" />
-                                    <span>YouTube ID: {item.videoId}</span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                                    {item.videoId ? `YouTube ID: ${item.videoId}` : "YouTube ID não informado"}
+                                  </span>
+                                </div>
+                              )}
 
-                            {item.type === "activity" && (
-                              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[#6b7a5f]">
-                                <span className="flex items-center gap-1">
-                                  <Target className="h-3 w-3" />
-                                  Banco: {item.questions?.length ?? 0} perguntas
-                                </span>
-                                <span className="uppercase tracking-wider">
-                                  Pontos: {item.totalPoints ?? 0}
-                                </span>
-                                <span className="uppercase tracking-wider">
-                                  Sorteio: {item.drawCount ?? 0}
-                                </span>
-                                <span className="uppercase tracking-wider">
-                                  Tentativas: {item.attemptLimit ?? 0}
-                                </span>
-                                <span className="uppercase tracking-wider">Questionário de apoio</span>
-                              </div>
-                            )}
+                              {entry.kind === "lesson" && item.type === "video" && item.materials && item.materials.length > 0 && (
+                                <div className="mt-2 space-y-1 text-xs text-[#6b7a5f]">
+                                  <span className="text-[10px] uppercase tracking-wider text-[#6b7a5f]">
+                                    Materiais da aula
+                                  </span>
+                                  <div className="flex flex-wrap gap-2">
+                                    {item.materials.map((attachment) => (
+                                      <div
+                                        key={attachment.id}
+                                        className="flex items-center gap-2 px-2 py-1 bg-secondary border border-border"
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                        <span className="break-words">
+                                          {attachment.name} ({attachment.kind})
+                                        </span>
+                                        <span className="break-all text-[#F4511E]">
+                                          {attachment.url}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {entry.kind === "lesson" && item.type === "material" && (
+                                <div className="mt-2 space-y-1 text-xs text-[#6b7a5f]">
+                                  <div className="flex flex-wrap items-center gap-2 break-all">
+                                    <FileText className="h-3 w-3" />
+                                    <span>
+                                      {item.materialPdfUrl
+                                        ? `PDF: ${item.materialPdfUrl}`
+                                        : "PDF não informado"}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2 break-all">
+                                    <LinkIcon className="h-3 w-3" />
+                                    <span>
+                                      {item.materialLinkUrl
+                                        ? `Link: ${item.materialLinkUrl}`
+                                        : "Link não informado"}
+                                    </span>
+                                  </div>
+                                  {item.videoId && (
+                                    <div className="flex flex-wrap items-center gap-2 break-all">
+                                      <Play className="h-3 w-3" />
+                                      <span>YouTube ID: {item.videoId}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {entry.kind === "exam" && (
+                                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[#6b7a5f]">
+                                  <span className="flex items-center gap-1">
+                                    <Target className="h-3 w-3" />
+                                    Banco: {item.questions?.length ?? 0} perguntas
+                                  </span>
+                                  <span className="uppercase tracking-wider">
+                                    Pontos: {item.totalPoints ?? 0}
+                                  </span>
+                                  <span className="uppercase tracking-wider">
+                                    Sorteio: {item.drawCount ?? 0}
+                                  </span>
+                                  <span className="uppercase tracking-wider">
+                                    Tentativas: {item.attemptLimit ?? 0}
+                                  </span>
+                                  <span className="uppercase tracking-wider">Questionário de apoio</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleDeleteItem(module.id, item.id)}
-                            className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
-                            title="Remover conteúdo"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleDeleteItem(module.id, item.id, entry.kind)}
+                              className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
+                              title="Remover conteúdo"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
 
                   <div className="p-3">
                     <button
@@ -1034,9 +993,9 @@ export default function AdminCourseDetailPage() {
                 <Award className="h-5 w-5 text-[#F4511E]" />
               </div>
               <div>
-                <h3 className="font-bold text-foreground">Exame Final (Certificação)</h3>
+                <h3 className="font-bold text-foreground">Exame Final</h3>
                 <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                  Avaliação obrigatória para certificação
+                  Avaliacao obrigatoria do curso
                 </p>
               </div>
             </div>
@@ -1088,7 +1047,7 @@ export default function AdminCourseDetailPage() {
                 </span>
               </div>
               <p className="text-xs text-[#6b7a5f] mt-3">
-                Este exame aparece ao final do curso e libera o certificado após aprovação.
+                Este exame aparece ao final do curso e valida a conclusao.
               </p>
             </div>
           ) : (
@@ -1097,176 +1056,7 @@ export default function AdminCourseDetailPage() {
             </div>
           )}
             </div>
-          </>
-        )}
-
-        {activeTab === "certificado" && (
-          <div className="space-y-6">
-            <div className="border border-border bg-card p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
-                  <Award className="h-5 w-5 text-[#F4511E]" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-foreground">Emissor de Certificados</h2>
-                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                    Configure assinaturas, selo e layout do certificado
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="border border-border bg-card p-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                    Titulo do certificado
-                  </label>
-                  <Input
-                    value={course.certificateConfig.title}
-                    onChange={(e) => {
-                      updateCourse((prev) => ({
-                        ...prev,
-                        certificateConfig: {
-                          ...prev.certificateConfig,
-                          title: e.target.value
-                        }
-                      }))
-                    }}
-                    className="border-border bg-secondary rounded-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                    Subtitulo
-                  </label>
-                  <Input
-                    value={course.certificateConfig.subtitle}
-                    onChange={(e) => {
-                      updateCourse((prev) => ({
-                        ...prev,
-                        certificateConfig: {
-                          ...prev.certificateConfig,
-                          subtitle: e.target.value
-                        }
-                      }))
-                    }}
-                    className="border-border bg-secondary rounded-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                    Emissor
-                  </label>
-                  <Input
-                    value={course.certificateConfig.issuer}
-                    onChange={(e) => {
-                      updateCourse((prev) => ({
-                        ...prev,
-                        certificateConfig: {
-                          ...prev.certificateConfig,
-                          issuer: e.target.value
-                        }
-                      }))
-                    }}
-                    className="border-border bg-secondary rounded-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                    URL do selo
-                  </label>
-                  <Input
-                    value={course.certificateConfig.sealUrl}
-                    onChange={(e) => {
-                      updateCourse((prev) => ({
-                        ...prev,
-                        certificateConfig: {
-                          ...prev.certificateConfig,
-                          sealUrl: e.target.value
-                        }
-                      }))
-                    }}
-                    className="border-border bg-secondary rounded-none"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                    URL do background
-                  </label>
-                  <Input
-                    value={course.certificateConfig.backgroundUrl}
-                    onChange={(e) => {
-                      updateCourse((prev) => ({
-                        ...prev,
-                        certificateConfig: {
-                          ...prev.certificateConfig,
-                          backgroundUrl: e.target.value
-                        }
-                      }))
-                    }}
-                    className="border-border bg-secondary rounded-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                  Assinaturas
-                </p>
-                <div className="space-y-3">
-                  {course.certificateConfig.signers.map((signer) => (
-                    <div key={signer.id} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
-                      <Input
-                        placeholder="Nome"
-                        value={signer.name}
-                        onChange={(e) => updateSigner(signer.id, { name: e.target.value })}
-                        className="border-border bg-secondary rounded-none"
-                      />
-                      <Input
-                        placeholder="Cargo"
-                        value={signer.role}
-                        onChange={(e) => updateSigner(signer.id, { role: e.target.value })}
-                        className="border-border bg-secondary rounded-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeSigner(signer.id)}
-                        className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors"
-                        title="Remover assinatura"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={addSigner}
-                    className="border-border rounded-none"
-                  >
-                    Adicionar Assinatura
-                  </Button>
-                </div>
-              </div>
-
-              <RichTextEditor
-                label="Notas e clausulas"
-                value={course.certificateConfig.notes}
-                onChange={(value) => {
-                  updateCourse((prev) => ({
-                    ...prev,
-                    certificateConfig: {
-                      ...prev.certificateConfig,
-                      notes: value
-                    }
-                  }))
-                }}
-                placeholder="Inclua observacoes legais e regras do certificado..."
-              />
-            </div>
-          </div>
-        )}
+        </>
 
       {/* Add Module Modal */}
       {showAddModuleModal && (

@@ -5,27 +5,27 @@ import { useRouter } from "next/navigation"
 import { Bell, ChevronRight, X } from "lucide-react"
 import {
   useCombatContext,
-  type NotificationItem,
-  type NotificationType
+  type Notification,
+  type NotificationKind
 } from "@/contexts/CombatContext"
 
-const typeLabels: Record<NotificationType, string> = {
-  AULA_NOVA: "Aula nova",
-  ATIVIDADE_CORRIGIDA: "Atividade corrigida",
-  NOVA_ATIVIDADE: "Nova atividade",
-  BROADCAST_GERAL: "Comunicado"
+const typeLabels: Record<NotificationKind, string> = {
+  LESSON_NEW: "Aula nova",
+  EXAM_GRADED: "Atividade corrigida",
+  EXAM_AVAILABLE: "Nova atividade",
+  GLOBAL_ALERT: "Comunicado"
 }
 
 export function NotificationCenter() {
   const router = useRouter()
   const { currentUser, markAsRead } = useCombatContext()
   const [open, setOpen] = useState(false)
-  const [toast, setToast] = useState<NotificationItem | null>(null)
+  const [toast, setToast] = useState<Notification | null>(null)
   const [lastSeenId, setLastSeenId] = useState<number | null>(null)
 
   const notifications = currentUser?.notifications ?? []
   const unreadCount = useMemo(
-    () => notifications.filter((item) => !item.lida).length,
+    () => notifications.filter((item) => !item.read).length,
     [notifications]
   )
 
@@ -45,13 +45,13 @@ export function NotificationCenter() {
     return () => clearTimeout(timeout)
   }, [notifications, lastSeenId])
 
-  const handleClick = (item: NotificationItem) => {
+  const handleClick = (item: Notification) => {
     if (!currentUser) return
-    if (!item.lida) {
+    if (!item.read) {
       markAsRead(currentUser.id, item.id)
     }
     setOpen(false)
-    router.push(item.rota)
+    router.push(item.link)
   }
 
   return (
@@ -105,17 +105,17 @@ export function NotificationCenter() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] uppercase tracking-wider font-mono text-[#F4511E]">
-                      {typeLabels[item.tipo]}
+                      {typeLabels[item.kind]}
                     </span>
                     <span className="text-[10px] font-mono text-[#6b7a5f]">
-                      {item.timestamp}
+                      {item.createdAt}
                     </span>
                   </div>
                   <p className="text-xs text-foreground mt-1">
-                    {item.mensagem}
+                    {item.message}
                   </p>
                   <div className="mt-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#6b7a5f]">
-                    <span>{item.lida ? "Lida" : "Nova"}</span>
+                    <span>{item.read ? "Lida" : "Nova"}</span>
                     <ChevronRight className="h-3 w-3" />
                   </div>
                 </button>
@@ -128,9 +128,9 @@ export function NotificationCenter() {
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 border border-[#F4511E] bg-black px-4 py-3 shadow-lg animate-[slide-in_0.2s_ease-out]">
           <p className="text-[10px] uppercase tracking-wider font-mono text-[#F4511E]">
-            {typeLabels[toast.tipo]}
+            {typeLabels[toast.kind]}
           </p>
-          <p className="text-xs text-foreground mt-1">{toast.mensagem}</p>
+          <p className="text-xs text-foreground mt-1">{toast.message}</p>
         </div>
       )}
 

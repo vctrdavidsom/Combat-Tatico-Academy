@@ -9,7 +9,6 @@ import {
   CircleDot,
   ClipboardList,
   FileText,
-  Shield,
   Target,
   UploadCloud,
   XCircle
@@ -49,7 +48,7 @@ export default function StudentAdminPage() {
     )
   }
 
-  const studentAttempts = tentativasExames.filter((attempt) => attempt.alunoId === student.id)
+  const studentAttempts = tentativasExames.filter((attempt) => attempt.userId === student.id)
 
   const selectedAttempt = useMemo(() => {
     if (!selectedAttemptId) return studentAttempts[0] || null
@@ -62,7 +61,7 @@ export default function StudentAdminPage() {
     const course = listaCursos.find((item) => item.id === attempt.courseId)
     if (!course) return null
 
-    if (attempt.type === "exame") {
+    if (attempt.examType === "final") {
       return {
         courseName: course.name,
         moduleName: "Exame Final",
@@ -71,10 +70,10 @@ export default function StudentAdminPage() {
       }
     }
 
-    const module = course.modules.find(
-      (item) => item.id === attempt.moduleId || item.items.some((i) => i.id === attempt.contentId)
-    )
-    const item = module?.items.find((i) => i.id === attempt.contentId && i.type === "activity")
+    const module =
+      course.modules.find((item) => item.id === attempt.moduleId) ||
+      course.modules.find((item) => item.exams.some((exam) => exam.id === attempt.examId))
+    const item = module?.exams.find((exam) => exam.id === attempt.examId)
     return {
       courseName: course.name,
       moduleName: module?.name,
@@ -107,12 +106,15 @@ export default function StudentAdminPage() {
     return listaCursos.map((course) => ({
       course,
       modules: course.modules.map((module) => {
-        const activities = module.items.filter((item) => item.type === "activity")
+        const activities = module.exams.filter((item) => item.type === "activity")
         const rows = activities.map((item) => {
           const questions = item.questions || []
           const totalPoints = item.totalPoints ?? sumQuestionPoints(questions)
           const attempts = studentAttempts.filter(
-            (attempt) => attempt.courseId === course.id && attempt.contentId === item.id && attempt.type === "atividade"
+            (attempt) =>
+              attempt.courseId === course.id &&
+              attempt.examId === item.id &&
+              attempt.examType === "activity"
           )
           const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
           let earnedPoints = 0
@@ -159,10 +161,15 @@ export default function StudentAdminPage() {
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result !== "string") return
+      const certificateCourseId =
+        Number(Object.keys(student.courses).find((id) => student.courses[Number(id)])) ||
+        listaCursos[0]?.id ||
+        0
       uploadCertificadoExterno(student.id, {
-        name: file.name,
-        dataUrl: reader.result,
-        uploadedAt: new Date().toISOString().slice(0, 10)
+        id: Date.now(),
+        userId: student.id,
+        courseId: certificateCourseId,
+        fileUrl: reader.result
       })
     }
     reader.readAsDataURL(file)
@@ -181,6 +188,10 @@ export default function StudentAdminPage() {
   }
 
   const documents = student.documents || []
+  const certificate = student.certificate
+  const certificateLabel = certificate?.fileUrl
+    ? certificate.fileUrl.split("/").pop() || "Certificado"
+    : "Certificado"
 
   return (
     <div className="space-y-6">
@@ -214,8 +225,8 @@ export default function StudentAdminPage() {
                 <p className="font-mono text-foreground">{student.cpf || "Nao informado"}</p>
               </div>
               <div>
-                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Matricula</p>
-                <p className="font-mono text-foreground">{student.matricula || "Nao informado"}</p>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">ID</p>
+                <p className="font-mono text-foreground">{String(student.id).padStart(4, "0")}</p>
               </div>
               <div>
                 <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Telefone</p>
@@ -265,6 +276,26 @@ export default function StudentAdminPage() {
               <UploadCloud className="h-4 w-4" />
               <h2 className="text-sm font-bold uppercase tracking-wider">Certificado Externo</h2>
             </div>
+            {certificate ? (
+              <div className="mt-3 space-y-2 text-xs">
+                <div>
+                  <p className="text-[#6b7a5f] uppercase tracking-wider">Arquivo atual</p>
+                  <p className="text-foreground break-all">{certificateLabel}</p>
+                  <p className="text-[10px] text-[#6b7a5f]">Curso {certificate.courseId}</p>
+                </div>
+                <Button
+                  asChild
+                  variant="outline"
+                  className="border-border rounded-none"
+                >
+                  <a href={certificate.fileUrl} download>
+                    Baixar certificado
+                  </a>
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-[#6b7a5f]">Nenhum certificado enviado.</p>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -276,7 +307,7 @@ export default function StudentAdminPage() {
               onClick={() => fileInputRef.current?.click()}
               className="mt-4 bg-[#F4511E] text-black rounded-none"
             >
-              Upload de Certificado
+              {certificate ? "Atualizar certificado" : "Upload de certificado"}
             </Button>
           </div>
         </section>
@@ -330,7 +361,7 @@ export default function StudentAdminPage() {
                             : "hover:bg-[#111111]"
                         }`}
                       >
-                        <p className="text-[10px] text-[#6b7a5f] uppercase tracking-wider">{attempt.type}</p>
+                        <p className="text-[10px] text-[#6b7a5f] uppercase tracking-wider">{attempt.examType}</p>
                         <p className="text-sm text-foreground font-medium">{attempt.title}</p>
                         <p className="text-[10px] text-[#6b7a5f]">{attempt.submittedAt}</p>
                       </button>
@@ -408,20 +439,6 @@ export default function StudentAdminPage() {
         </section>
       </div>
 
-      <div className="border border-border bg-black p-4">
-        <div className="flex items-center gap-2 text-[#F4511E]">
-          <Shield className="h-4 w-4" />
-          <h2 className="text-sm font-bold uppercase tracking-wider">Auditoria</h2>
-        </div>
-        <div className="mt-3 space-y-2 text-xs text-[#6b7a5f]">
-          {student.auditLog.map((entry) => (
-            <div key={entry.id} className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[#F4511E]" />
-              {entry.action} em {entry.date} {entry.details ? `- ${entry.details}` : ""}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }

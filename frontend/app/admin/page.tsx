@@ -87,7 +87,8 @@ export default function AdminPage() {
         name: newStudent.name,
         email: newStudent.email,
         password: newStudent.password,
-        enrolled: formattedDate,
+        role: "student",
+        enrolledAt: formattedDate,
         status: "pendente",
         phone: newStudent.phone,
         cpf: newStudent.cpf,
@@ -282,7 +283,7 @@ export default function AdminPage() {
                           <td className="p-4 hidden md:table-cell">
                             <div className="flex items-center gap-1 text-xs text-[#6b7a5f]">
                               <Calendar className="h-3 w-3" />
-                              {student.enrolled}
+                              {student.enrolledAt}
                             </div>
                           </td>
                           <td className="p-4">

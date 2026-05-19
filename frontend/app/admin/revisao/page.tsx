@@ -12,8 +12,8 @@ export default function ReviewPage() {
     (attempt) => attempt.hasEssay && attempt.status === "pendente"
   )
 
-  const resolveStudentName = (alunoId: number) =>
-    listaAlunos.find((student) => student.id === alunoId)?.name || "Aluno"
+  const resolveStudentName = (userId: number) =>
+    listaAlunos.find((student) => student.id === userId)?.name || "Aluno"
 
   const resolveCourseName = (courseId: number) =>
     listaCursos.find((course) => course.id === courseId)?.name || "Curso"
@@ -51,11 +51,11 @@ export default function ReviewPage() {
                   <p className="text-sm text-foreground font-medium">{attempt.title}</p>
                   <div className="flex items-center gap-2 text-xs text-[#6b7a5f]">
                     <User className="h-3 w-3" />
-                    {resolveStudentName(attempt.alunoId)}
+                    {resolveStudentName(attempt.userId)}
                   </div>
                 </div>
                 <button
-                  onClick={() => router.push(`/admin/aluno/${attempt.alunoId}`)}
+                  onClick={() => router.push(`/admin/aluno/${attempt.userId}`)}
                   className="flex items-center gap-2 border border-[#F4511E] px-3 py-2 text-xs uppercase tracking-wider text-[#F4511E] hover:bg-[#F4511E] hover:text-black transition-colors"
                 >
                   Abrir

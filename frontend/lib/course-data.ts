@@ -11,8 +11,7 @@ export const courseMock = {
       id: 1,
       name: "Módulo 1: Fundamentos",
       description: "Introdução às técnicas básicas de combate",
-      isExpanded: true,
-      items: [
+      lessons: [
         {
           id: 1,
           type: "video",
@@ -29,7 +28,9 @@ export const courseMock = {
           materialLinkUrl: "https://example.com/leitura-fundamentos",
           duration: "20min",
           materials: []
-        },
+        }
+      ],
+      exams: [
         {
           id: 3,
           type: "activity",
@@ -61,8 +62,7 @@ export const courseMock = {
       id: 2,
       name: "Módulo 2: Técnicas Avançadas",
       description: "Técnicas avançadas de combate corpo a corpo",
-      isExpanded: false,
-      items: [
+      lessons: [
         {
           id: 4,
           type: "video",
@@ -71,12 +71,14 @@ export const courseMock = {
           duration: "50min",
           materials: []
         }
-      ]
+      ],
+      exams: []
     }
   ],
   finalExam: {
     id: 1,
-    title: "Exame Final de Certificação",
+    title: "Exame Final do Curso",
+    type: "final",
     cutScore: 70,
     durationMinutes: 60,
     drawCount: 10,
@@ -99,17 +101,5 @@ export const courseMock = {
         weight: 1
       }
     ]
-  },
-  certificateConfig: {
-    title: "Certificado de Conclusao",
-    subtitle: "Combat Tatico Academy",
-    issuer: "Diretoria de Operacoes",
-    sealUrl: "https://example.com/selos/cta-seal.png",
-    backgroundUrl: "https://example.com/certificados/template-dark.png",
-    signers: [
-      { id: 1, name: "Cel. Almeida", role: "Comandante Geral" },
-      { id: 2, name: "Cap. Souza", role: "Instrutor Chefe" }
-    ],
-    notes: "Assinaturas digitais aplicadas automaticamente."
   }
 }

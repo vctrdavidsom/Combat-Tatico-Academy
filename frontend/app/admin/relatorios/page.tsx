@@ -20,7 +20,7 @@ export default function ReportsPage() {
         id: student.id,
         name: student.name,
         completed,
-        attempts: tentativasExames.filter((attempt) => attempt.alunoId === student.id).length
+        attempts: tentativasExames.filter((attempt) => attempt.userId === student.id).length
       }
     })
     const ranking = [...studentProgress].sort((a, b) => b.completed - a.completed).slice(0, 5)

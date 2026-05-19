@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   BookOpen,
+  Award,
   ClipboardList,
   FileText,
   LogOut,
@@ -24,7 +25,7 @@ import { Input } from "@/components/ui/input"
 import {
   useCombatContext,
   type Question,
-  type StudentDocument
+  type UserDocument
 } from "@/contexts/CombatContext"
 
 type SectionKey = "cursos" | "dados" | "atividades" | "notas"
@@ -48,12 +49,11 @@ export default function DashboardPage() {
   const {
     listaCursos,
     tentativasExames,
-    quadroAvisos,
     currentUser,
     logout,
     adicionarDocumentoAluno,
     alterarSenhaAluno,
-    marcarAvisoCiente
+    markAsRead
   } = useCombatContext()
 
   const searchParams = useSearchParams()
@@ -71,7 +71,7 @@ export default function DashboardPage() {
 
   const studentAttempts = useMemo(() => {
     if (!currentUser) return []
-    return tentativasExames.filter((attempt) => attempt.alunoId === currentUser.id)
+    return tentativasExames.filter((attempt) => attempt.userId === currentUser.id)
   }, [tentativasExames, currentUser])
 
   useEffect(() => {
@@ -97,13 +97,15 @@ export default function DashboardPage() {
 
   const pendingCriticalNotice = useMemo(() => {
     if (!currentUser) return null
-    const acknowledged = currentUser.acknowledgedBroadcasts ?? []
-    return (
-      quadroAvisos.find(
-        (notice) => notice.priority === "critico" && !acknowledged.includes(notice.id)
-      ) || null
-    )
-  }, [quadroAvisos, currentUser])
+    const pending = currentUser.notifications
+      .filter((notice) =>
+        notice.scope === "global" &&
+        notice.severity === "critical" &&
+        !notice.read
+      )
+      .sort((a, b) => b.id - a.id)
+    return pending[0] ?? null
+  }, [currentUser])
 
   const selectedAttempt = useMemo(() => {
     if (!selectedAttemptId) return null
@@ -115,7 +117,7 @@ export default function DashboardPage() {
     const course = listaCursos.find((item) => item.id === selectedAttempt.courseId)
     if (!course) return null
 
-    if (selectedAttempt.type === "exame") {
+    if (selectedAttempt.examType === "final") {
       return {
         courseName: course.name,
         activityName: course.finalExam?.title || selectedAttempt.title,
@@ -123,10 +125,10 @@ export default function DashboardPage() {
       }
     }
 
-    const module = course.modules.find(
-      (item) => item.id === selectedAttempt.moduleId || item.items.some((i) => i.id === selectedAttempt.contentId)
-    )
-    const item = module?.items.find((i) => i.id === selectedAttempt.contentId && i.type === "activity")
+    const module =
+      course.modules.find((item) => item.id === selectedAttempt.moduleId) ||
+      course.modules.find((item) => item.exams.some((exam) => exam.id === selectedAttempt.examId))
+    const item = module?.exams.find((exam) => exam.id === selectedAttempt.examId)
 
     return {
       courseName: course.name,
@@ -185,12 +187,15 @@ export default function DashboardPage() {
     return availableCourses.map((course) => ({
       course,
       modules: course.modules.map((module) => {
-        const activities = module.items.filter((item) => item.type === "activity")
+        const activities = module.exams.filter((item) => item.type === "activity")
         const rows = activities.map((item) => {
           const questions = item.questions || []
           const totalPoints = item.totalPoints ?? sumQuestionPoints(questions)
           const attempts = studentAttempts.filter(
-            (attempt) => attempt.courseId === course.id && attempt.contentId === item.id && attempt.type === "atividade"
+            (attempt) =>
+              attempt.courseId === course.id &&
+              attempt.examId === item.id &&
+              attempt.examType === "activity"
           )
           const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
           let earnedPoints = 0
@@ -261,7 +266,7 @@ export default function DashboardPage() {
       adicionarDocumentoAluno(currentUser.id, {
         name: file.name,
         kind,
-        dataUrl: reader.result
+        fileUrl: reader.result
       })
     }
     reader.readAsDataURL(file)
@@ -276,6 +281,10 @@ export default function DashboardPage() {
   }
 
   const documents = currentUser.documents || []
+  const certificate = currentUser.certificate
+  const certificateLabel = certificate?.fileUrl
+    ? certificate.fileUrl.split("/").pop() || "Certificado"
+    : "Certificado"
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -336,11 +345,13 @@ export default function DashboardPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs uppercase tracking-wider text-[#F4511E]">Alerta Critico</p>
-                  <p className="text-sm font-bold text-foreground">{pendingCriticalNotice.title}</p>
+                  <p className="text-sm font-bold text-foreground">
+                    {pendingCriticalNotice.title || "Comunicado"}
+                  </p>
                   <p className="text-xs text-[#6b7a5f]">{pendingCriticalNotice.message}</p>
                 </div>
                 <Button
-                  onClick={() => marcarAvisoCiente(currentUser.id, pendingCriticalNotice.id)}
+                  onClick={() => markAsRead(currentUser.id, pendingCriticalNotice.id)}
                   className="bg-[#F4511E] text-black rounded-none"
                 >
                   Ciente
@@ -412,8 +423,8 @@ export default function DashboardPage() {
                       <p className="text-foreground font-mono">{currentUser.cpf || "Nao informado"}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Matricula</p>
-                      <p className="text-foreground font-mono">{currentUser.matricula || "Nao informado"}</p>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">ID</p>
+                      <p className="text-foreground font-mono">{String(currentUser.id).padStart(4, "0")}</p>
                     </div>
                     <div>
                       <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Email</p>
@@ -447,6 +458,32 @@ export default function DashboardPage() {
                     <UploadCloud className="h-4 w-4 mr-2" />
                     Enviar Documento
                   </Button>
+                </div>
+
+                <div className="border border-border bg-[#0a0a0a] p-4 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Award className="h-4 w-4 text-[#F4511E]" />
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Certificado</h2>
+                  </div>
+                  {certificate ? (
+                    <div className="space-y-2 text-xs">
+                      <div>
+                        <p className="text-[#6b7a5f] uppercase tracking-wider">Arquivo</p>
+                        <p className="text-foreground break-all">{certificateLabel}</p>
+                        <p className="text-[10px] text-[#6b7a5f]">Curso {certificate.courseId}</p>
+                      </div>
+                      <Button
+                        asChild
+                        className="bg-[#F4511E] text-black rounded-none"
+                      >
+                        <a href={certificate.fileUrl} download>
+                          Baixar certificado
+                        </a>
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[#6b7a5f]">Aguardando upload do administrador.</p>
+                  )}
                 </div>
               </div>
 
@@ -510,7 +547,7 @@ export default function DashboardPage() {
                               : "hover:bg-[#111111]"
                           }`}
                         >
-                          <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{attempt.type}</p>
+                          <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{attempt.examType}</p>
                           <p className="text-sm text-foreground font-medium">{attempt.title}</p>
                           <p className="text-[10px] text-[#6b7a5f]">{attempt.submittedAt}</p>
                         </button>
@@ -668,7 +705,7 @@ export default function DashboardPage() {
   )
 }
 
-function DocumentRow({ document }: { document: StudentDocument }) {
+function DocumentRow({ document }: { document: UserDocument }) {
   const status = document.status ?? "aguardando"
   const statusConfig =
     status === "validado"

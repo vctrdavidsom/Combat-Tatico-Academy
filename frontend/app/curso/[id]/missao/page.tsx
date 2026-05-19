@@ -16,7 +16,7 @@ export default function MissionPage() {
   const course = listaCursos.find((item) => item.id === courseId) || listaCursos[0]
   const type = searchParams.get("type") || "final"
   const moduleId = Number(searchParams.get("moduleId"))
-  const itemId = Number(searchParams.get("itemId"))
+  const examId = Number(searchParams.get("examId"))
 
   const mission = useMemo(() => {
     if (type === "final") {
@@ -26,27 +26,27 @@ export default function MissionPage() {
         durationMinutes: course.finalExam?.durationMinutes || 0,
         cutScore: course.finalExam?.cutScore || 0,
         attemptLimit: course.finalExam?.attemptLimit || 0,
-        contentId: course.finalExam?.id,
+        examId: course.finalExam?.id || 0,
         moduleId: undefined
       }
     }
 
     const module = course.modules.find((m) => m.id === moduleId)
-    const item = module?.items.find((i) => i.id === itemId)
-    if (!item || item.type !== "activity") {
+    const exam = module?.exams.find((i) => i.id === examId)
+    if (!exam) {
       return null
     }
 
     return {
-      title: item.title,
-      questions: item.questions || [],
+      title: exam.title,
+      questions: exam.questions || [],
       durationMinutes: 0,
       cutScore: 0,
-      attemptLimit: item.attemptLimit || 0,
-      contentId: item.id,
+      attemptLimit: exam.attemptLimit || 0,
+      examId: exam.id,
       moduleId: module?.id
     }
-  }, [course, type, moduleId, itemId])
+  }, [course, type, moduleId, examId])
 
   if (!mission) {
     return (
@@ -68,10 +68,10 @@ export default function MissionPage() {
   const attemptsUsed = currentUser
     ? tentativasExames.filter(
         (attempt) =>
-          attempt.alunoId === currentUser.id &&
+          attempt.userId === currentUser.id &&
           attempt.courseId === course.id &&
-          attempt.type === (type === "final" ? "exame" : "atividade") &&
-          attempt.contentId === mission.contentId
+          attempt.examType === (type === "final" ? "final" : "activity") &&
+          attempt.examId === mission.examId
       )
     : []
 
@@ -117,10 +117,10 @@ export default function MissionPage() {
     enviarMissao({
       alunoId: currentUser.id,
       courseId: course.id,
-      contentId: mission.contentId,
+      examId: mission.examId,
       moduleId: mission.moduleId,
       title: mission.title,
-      type: type === "final" ? "exame" : "atividade",
+      examType: type === "final" ? "final" : "activity",
       answers: payload.answers,
       scorePercent: payload.scorePercent,
       scorePoints: payload.scorePoints,

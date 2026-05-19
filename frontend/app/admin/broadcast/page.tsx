@@ -1,20 +1,39 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Megaphone, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { type BroadcastPriority } from "@/lib/admin-broadcasts"
 import { useCombatContext } from "@/contexts/CombatContext"
 
 export default function BroadcastPage() {
-  const { quadroAvisos, criarAviso } = useCombatContext()
+  const { listaAlunos, criarAviso } = useCombatContext()
   const [draft, setDraft] = useState({
     title: "",
     message: "",
-    priority: "informativo" as BroadcastPriority
+    priority: "info" as const
   })
+
+  const globalNotices = useMemo(() => {
+    const map = new Map<number, { id: number; title?: string; message: string; severity: string; createdAt: string }>()
+    listaAlunos.forEach((student) => {
+      student.notifications
+        .filter((notice) => notice.scope === "global")
+        .forEach((notice) => {
+          if (!map.has(notice.id)) {
+            map.set(notice.id, {
+              id: notice.id,
+              title: notice.title,
+              message: notice.message,
+              severity: notice.severity,
+              createdAt: notice.createdAt
+            })
+          }
+        })
+    })
+    return Array.from(map.values()).sort((a, b) => b.id - a.id)
+  }, [listaAlunos])
 
   const handleSend = () => {
     if (!draft.title || !draft.message) {
@@ -26,7 +45,7 @@ export default function BroadcastPage() {
       message: draft.message,
       priority: draft.priority
     })
-    setDraft({ title: "", message: "", priority: "informativo" })
+    setDraft({ title: "", message: "", priority: "info" })
   }
 
   return (
@@ -55,11 +74,11 @@ export default function BroadcastPage() {
             />
             <select
               value={draft.priority}
-              onChange={(e) => setDraft({ ...draft, priority: e.target.value as BroadcastPriority })}
+              onChange={(e) => setDraft({ ...draft, priority: e.target.value as "info" | "critical" })}
               className="border border-border bg-secondary text-xs uppercase tracking-wider rounded-none px-2 py-2 text-[#6b7a5f]"
             >
-                <option value="informativo">Informativo</option>
-                <option value="critico">Critico</option>
+                <option value="info">Informativo</option>
+                <option value="critical">Critico</option>
             </select>
           </div>
           <Textarea
@@ -78,16 +97,16 @@ export default function BroadcastPage() {
         </div>
 
         <div className="grid gap-4">
-          {quadroAvisos.map((notice) => (
+          {globalNotices.map((notice) => (
             <div key={notice.id} className="border border-border bg-card p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-bold text-foreground">{notice.title}</p>
+                  <p className="text-sm font-bold text-foreground">{notice.title || "Comunicado"}</p>
                   <p className="text-xs text-[#6b7a5f]">{notice.message}</p>
                 </div>
                 <div className="text-right text-xs text-[#6b7a5f]">
-                  <p className="uppercase tracking-wider">{notice.priority}</p>
-                  <p>{notice.createdAt} • {notice.author}</p>
+                  <p className="uppercase tracking-wider">{notice.severity}</p>
+                  <p>{notice.createdAt}</p>
                 </div>
               </div>
             </div>
