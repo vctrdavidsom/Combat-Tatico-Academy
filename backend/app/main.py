@@ -29,6 +29,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+app.include_router(users_router)
 
 # Rota de teste simples (Sem roteadores externos por enquanto)
 @app.get("/", tags=["Health Check"])
