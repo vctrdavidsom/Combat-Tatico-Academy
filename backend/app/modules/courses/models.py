@@ -1,6 +1,10 @@
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from app.modules.lessons.models import Lesson
+    from app.modules.exams.models import Exam
 
 # --- TABELA INTERMEDIÁRIA (LIBERAÇÃO DO CURSO PARA O ALUNO) ---
 class Enrollment(SQLModel, table=True):
@@ -30,3 +34,5 @@ class Module(SQLModel, table=True):
     
     course_id: int = Field(foreign_key="course.id", ondelete="CASCADE")
     course: Course = Relationship(back_populates="modules")
+    lessons: List["Lesson"] = Relationship(back_populates="module", cascade_delete=True)
+    exams: List["Exam"] = Relationship(back_populates="module", cascade_delete=True)

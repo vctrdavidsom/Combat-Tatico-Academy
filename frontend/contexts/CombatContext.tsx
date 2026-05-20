@@ -1,7 +1,6 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react"
-import { courseMock } from "@/lib/course-data"
 import { initialLibraryItems, type LibraryItem } from "@/lib/admin-library"
 
 export type QuestionType = "multiple" | "essay"
@@ -227,30 +226,7 @@ const ADMIN_EMAIL = "admin@combat.com"
 const ADMIN_PASSWORD = "admin123"
 
 const buildInitialCourses = (): Course[] => {
-  const base = courseMock as Course
-  const course2: Course = {
-    id: 2,
-    code: "SSP-002",
-    name: "Supervisor em Seguranca Privada",
-    description: "<p>Formacao completa para supervisao de equipes de seguranca.</p>",
-    thumbnail: "",
-    totalHours: "60h",
-    status: "ativo",
-    modules: [],
-    finalExam: null
-  }
-  const course3: Course = {
-    id: 3,
-    code: "ARM-003",
-    name: "Instrucao de Armeiro",
-    description: "<p>Curso tecnico para manutencao e manuseio seguro de armamentos.</p>",
-    thumbnail: "",
-    totalHours: "40h",
-    status: "ativo",
-    modules: [],
-    finalExam: null
-  }
-  return [base, course2, course3]
+  return []
 }
 
 const buildInitialStudents = (): User[] => {
@@ -397,7 +373,7 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
     try {
       const parsed = JSON.parse(stored) as CombatState
       if (parsed?.listaAlunos && parsed?.listaCursos) {
-        setState(normalizeState(parsed))
+        setState(normalizeState({ ...parsed, listaCursos: [] }))
       }
     } catch {
       // ignore storage errors
