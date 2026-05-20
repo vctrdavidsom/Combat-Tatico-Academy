@@ -93,5 +93,6 @@ class ExamResult(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", ondelete="CASCADE")
     exam_id: int = Field(foreign_key="exam.id", ondelete="CASCADE")
     
+    user: Optional["User"] = Relationship()
     exam: "Exam" = Relationship(back_populates="results")
     answers: List["StudentAnswer"] = Relationship(back_populates="exam_result", cascade_delete=True)
