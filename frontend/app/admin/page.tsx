@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { 
   Users, 
@@ -26,13 +26,30 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { useCombatContext } from "@/contexts/CombatContext"
+
+type AdminUser = {
+  id: number
+  full_name: string
+  cpf: string
+  birth_date?: string | null
+  email: string
+  phone?: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  role: string
+  is_active: boolean
+}
 
 export default function AdminPage() {
+  const API_BASE_URL = "/api"
+  const ACCESS_TOKEN_KEY = "cta_access_token"
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { listaAlunos, cadastrarAluno } = useCombatContext()
   const [searchQuery, setSearchQuery] = useState("")
+  const [students, setStudents] = useState<AdminUser[]>([])
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false)
+  const [studentsError, setStudentsError] = useState("")
   const [activeTab, setActiveTab] = useState(
     searchParams.get("view") === "cursos" ? "cursos" : "alunos"
   )
@@ -43,6 +60,9 @@ export default function AdminPage() {
     }, [searchParams])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [isRegistering, setIsRegistering] = useState(false)
+  const [registerError, setRegisterError] = useState("")
+  const [registerSuccess, setRegisterSuccess] = useState("")
   const [newStudent, setNewStudent] = useState({ 
     name: "", 
     email: "", 
@@ -56,14 +76,67 @@ export default function AdminPage() {
     confirmPassword: ""
   })
 
+  const loadStudents = useCallback(async () => {
+    setStudentsError("")
+    setIsLoadingStudents(true)
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setStudents([])
+        setStudentsError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/users/admin`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const raw = await response.text()
+      let data: AdminUser[] | { detail?: string } | null = null
+      try {
+        data = raw ? JSON.parse(raw) : null
+      } catch {
+        data = null
+      }
+
+      if (!response.ok) {
+        const detail = (data as { detail?: unknown } | null)?.detail
+        const message = Array.isArray(detail)
+          ? detail.map((item) => (item as { msg?: string })?.msg || JSON.stringify(item)).join(" | ")
+          : typeof detail === "string"
+            ? detail
+            : detail
+              ? JSON.stringify(detail)
+              : raw || "Erro ao carregar alunos."
+        setStudentsError(message)
+        setStudents([])
+        return
+      }
+
+      const list = Array.isArray(data) ? data : []
+      setStudents(list.filter((user) => user.role === "STUDENT"))
+    } catch {
+      setStudentsError("Falha ao conectar com o servidor.")
+      setStudents([])
+    } finally {
+      setIsLoadingStudents(false)
+    }
+  }, [API_BASE_URL, ACCESS_TOKEN_KEY])
+
+  useEffect(() => {
+    loadStudents()
+  }, [loadStudents])
+
   const filteredStudents = useMemo(() => {
     const term = searchQuery.toLowerCase()
-    return listaAlunos.filter(
+    return students.filter(
       (student) =>
-        student.name.toLowerCase().includes(term) ||
+        student.full_name.toLowerCase().includes(term) ||
         student.email.toLowerCase().includes(term)
     )
-  }, [listaAlunos, searchQuery])
+  }, [students, searchQuery])
 
   const getStatusConfig = (status: string) => {
     switch (status) {
@@ -78,25 +151,59 @@ export default function AdminPage() {
     }
   }
 
-  const handleAddStudent = () => {
-    if (newStudent.name && newStudent.email && newStudent.cpf && newStudent.password && newStudent.password === newStudent.confirmPassword) {
-      const today = new Date()
-      const formattedDate = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`
+  const handleAddStudent = async () => {
+    if (!isFormValid || isRegistering) return
 
-      cadastrarAluno({
-        name: newStudent.name,
-        email: newStudent.email,
-        password: newStudent.password,
-        role: "student",
-        enrolledAt: formattedDate,
-        status: "pendente",
-        phone: newStudent.phone,
-        cpf: newStudent.cpf,
-        courses: {}
+    setRegisterError("")
+    setRegisterSuccess("")
+    setIsRegistering(true)
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      }
+      if (token) {
+        headers.Authorization = `Bearer ${token}`
+      }
+
+      const response = await fetch(`${API_BASE_URL}/users/register`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          full_name: newStudent.name,
+          cpf: newStudent.cpf,
+          birth_date: newStudent.birthDate,
+          email: newStudent.email,
+          phone: newStudent.phone,
+          address: newStudent.address,
+          city: newStudent.city,
+          state: newStudent.state,
+          password: newStudent.password,
+          role: "STUDENT"
+        })
       })
-      setNewStudent({ 
-        name: "", 
-        email: "", 
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null)
+        const detail = errorPayload?.detail
+        const message = Array.isArray(detail)
+          ? detail.map((item: { msg?: string }) => item?.msg || JSON.stringify(item)).join(" | ")
+          : typeof detail === "string"
+            ? detail
+            : detail
+              ? JSON.stringify(detail)
+              : "Erro ao cadastrar aluno."
+        setRegisterError(message)
+        setIsRegistering(false)
+        return
+      }
+
+      setRegisterSuccess("Aluno cadastrado com sucesso.")
+      await loadStudents()
+      setNewStudent({
+        name: "",
+        email: "",
         cpf: "",
         phone: "",
         birthDate: "",
@@ -107,7 +214,10 @@ export default function AdminPage() {
         confirmPassword: ""
       })
       setShowPassword(false)
-      setShowAddModal(false)
+    } catch {
+      setRegisterError("Falha ao conectar com o servidor.")
+    } finally {
+      setIsRegistering(false)
     }
   }
 
@@ -229,6 +339,22 @@ export default function AdminPage() {
               </Button>
             </div>
 
+            {studentsError && (
+              <div className="mb-4 border border-red-500/50 bg-red-500/10 p-3 text-center">
+                <span className="text-xs text-red-500 uppercase tracking-wider">
+                  {studentsError}
+                </span>
+              </div>
+            )}
+
+            {isLoadingStudents && (
+              <div className="mb-4 border border-border bg-secondary/30 p-3 text-center">
+                <span className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                  Carregando alunos...
+                </span>
+              </div>
+            )}
+
             {/* Students List */}
             <div className="border border-border bg-card overflow-hidden">
               <div className="overflow-x-auto">
@@ -239,7 +365,7 @@ export default function AdminPage() {
                         Aluno
                       </th>
                       <th className="text-left p-4 text-xs text-[#6b7a5f] uppercase tracking-wider font-medium hidden md:table-cell">
-                        Matrícula
+                        ID
                       </th>
                       <th className="text-left p-4 text-xs text-[#6b7a5f] uppercase tracking-wider font-medium">
                         Status
@@ -254,8 +380,7 @@ export default function AdminPage() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filteredStudents.map((student) => {
-                      const status = getStatusConfig(student.status)
-                      const coursesCount = Object.values(student.courses || {}).filter(Boolean).length
+                      const status = getStatusConfig(student.is_active ? "ativo" : "inativo")
                       return (
                         <tr 
                           key={student.id} 
@@ -266,12 +391,16 @@ export default function AdminPage() {
                             <div className="flex items-center gap-3 min-w-0">
                               <div className="flex h-10 w-10 items-center justify-center bg-[#6b7a5f]/20 border border-[#6b7a5f]">
                                 <span className="text-sm font-bold text-[#6b7a5f]">
-                                  {student.name.split(" ").map(n => n[0]).join("")}
+                                  {student.full_name
+                                    .split(" ")
+                                    .filter(Boolean)
+                                    .map((n) => n[0])
+                                    .join("")}
                                 </span>
                               </div>
                               <div className="min-w-0">
                                 <p className="font-medium text-foreground text-sm group-hover:text-[#F4511E] transition-colors truncate">
-                                  {student.name}
+                                  {student.full_name}
                                 </p>
                                 <p className="text-xs text-[#6b7a5f] flex items-center gap-1 break-all">
                                   <Mail className="h-3 w-3" />
@@ -283,7 +412,7 @@ export default function AdminPage() {
                           <td className="p-4 hidden md:table-cell">
                             <div className="flex items-center gap-1 text-xs text-[#6b7a5f]">
                               <Calendar className="h-3 w-3" />
-                              {student.enrolledAt}
+                              {student.id}
                             </div>
                           </td>
                           <td className="p-4">
@@ -292,10 +421,7 @@ export default function AdminPage() {
                             </span>
                           </td>
                           <td className="p-4 text-center hidden sm:table-cell">
-                            <span className="text-sm font-bold text-foreground">
-                              {coursesCount}
-                            </span>
-                            <span className="text-xs text-[#6b7a5f]"> / 3</span>
+                            <span className="text-xs text-[#6b7a5f]">--</span>
                           </td>
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-2 text-[#6b7a5f] group-hover:text-[#F4511E] transition-colors">
@@ -367,6 +493,13 @@ export default function AdminPage() {
 
             {/* Modal Body */}
             <div className="p-4 space-y-6 min-h-0 overflow-y-auto">
+              {registerSuccess && (
+                <div className="border border-green-500/50 bg-green-500/10 p-3 text-center">
+                  <span className="text-xs text-green-500 uppercase tracking-wider">
+                    {registerSuccess}
+                  </span>
+                </div>
+              )}
               {/* Dados Pessoais */}
               <div>
                 <h3 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
@@ -396,6 +529,9 @@ export default function AdminPage() {
                       onChange={(e) => setNewStudent({ ...newStudent, cpf: e.target.value })}
                       className="border-border bg-secondary rounded-none"
                     />
+                    {registerError && (
+                      <p className="text-xs text-red-500 mt-1">{registerError}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
@@ -559,10 +695,10 @@ export default function AdminPage() {
               </Button>
               <Button 
                 onClick={handleAddStudent}
-                disabled={!isFormValid}
+                disabled={!isFormValid || isRegistering}
                 className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
               >
-                Cadastrar Aluno
+                {isRegistering ? "Cadastrando..." : "Cadastrar Aluno"}
               </Button>
             </div>
           </div>

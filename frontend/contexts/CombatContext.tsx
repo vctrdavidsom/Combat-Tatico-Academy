@@ -1051,8 +1051,7 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
       criarAviso,
       addNotification,
       markAsRead,
-      marcarNotificacaoLida,
-      marcarAvisoCiente
+      marcarNotificacaoLida
     }),
     [state, currentUser]
   )

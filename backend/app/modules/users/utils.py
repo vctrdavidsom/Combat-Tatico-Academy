@@ -14,6 +14,7 @@ def create_first_admin(session: Session):
         
         first_admin = User(
             full_name="Administrador Root",
+            cpf="000.000.000-00",  # <- Adicionado CPF obrigatório
             email=settings.FIRST_ADMIN_EMAIL,
             hashed_password=hashed_pwd,
             role=UserRole.ADMIN

@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation"
 import { Shield, Lock, User, AlertTriangle, Eye, EyeOff, Mail, ArrowLeft, KeyRound, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useCombatContext } from "@/contexts/CombatContext"
 
 type ScreenState = "login" | "forgot-password" | "verify-code" | "new-password" | "success"
 
 export default function LoginPage() {
+  const API_BASE_URL = "/api"
+  const ACCESS_TOKEN_KEY = "cta_access_token"
   const [screen, setScreen] = useState<ScreenState>("login")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -25,24 +26,52 @@ export default function LoginPage() {
   const [showNewPassword, setShowNewPassword] = useState(false)
   
   const router = useRouter()
-  const { login } = useCombatContext()
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError("")
 
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    try {
+      const body = new URLSearchParams({
+        username: email,
+        password
+      }).toString()
+      const response = await fetch(`${API_BASE_URL}/users/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body
+      })
 
-    const result = login({ email, password })
-    if (!result.ok) {
-      setError("CREDENCIAIS INVÁLIDAS")
+      const raw = await response.text()
+      let data: { access_token?: string; detail?: string } | null = null
+      try {
+        data = raw ? JSON.parse(raw) : null
+      } catch {
+        data = null
+      }
+
+      if (!response.ok) {
+        const message = data?.detail || raw || "Credenciais invalidas."
+        setError(message)
+        setIsLoading(false)
+        return
+      }
+
+      if (!data?.access_token) {
+        setError("Resposta invalida do servidor.")
+        setIsLoading(false)
+        return
+      }
+
+      localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token)
+      router.push("/admin")
+    } catch {
+      setError("Falha ao conectar com o servidor.")
+    } finally {
       setIsLoading(false)
-      return
     }
-    router.push(result.role === "admin" ? "/admin" : "/dashboard")
-
-    setIsLoading(false)
   }
 
   const handleSendCode = async (e: React.FormEvent) => {

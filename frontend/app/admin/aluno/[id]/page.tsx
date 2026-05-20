@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState, type ChangeEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   Award,
@@ -21,12 +21,27 @@ import {
   type Question
 } from "@/contexts/CombatContext"
 
+type AdminUser = {
+  id: number
+  full_name: string
+  cpf: string
+  birth_date?: string | null
+  email: string
+  phone?: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  role: string
+  is_active: boolean
+}
+
 export default function StudentAdminPage() {
+  const API_BASE_URL = "/api"
+  const ACCESS_TOKEN_KEY = "cta_access_token"
   const params = useParams()
   const router = useRouter()
   const studentId = Number(params.id)
   const {
-    listaAlunos,
     listaCursos,
     tentativasExames,
     liberarCurso,
@@ -35,20 +50,77 @@ export default function StudentAdminPage() {
     validarDocumentoAluno
   } = useCombatContext()
 
-  const student = listaAlunos.find((item) => item.id === studentId)
+  const [studentInfo, setStudentInfo] = useState<AdminUser | null>(null)
+  const [studentError, setStudentError] = useState("")
+  const [isLoadingStudent, setIsLoadingStudent] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
   const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
 
-  if (!student) {
-    return (
-      <div className="border border-border bg-black p-6 text-xs text-[#6b7a5f]">
-        Aluno nao encontrado.
-      </div>
-    )
-  }
+  useEffect(() => {
+    if (!studentId) return
+    setStudentError("")
+    setIsLoadingStudent(true)
 
-  const studentAttempts = tentativasExames.filter((attempt) => attempt.userId === student.id)
+    const loadStudent = async () => {
+      try {
+        const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+        if (!token) {
+          setStudentInfo(null)
+          setStudentError("Token nao encontrado. Faca login novamente.")
+          return
+        }
+
+        const response = await fetch(`${API_BASE_URL}/users/admin/${studentId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        })
+
+        const raw = await response.text()
+        let data: AdminUser | { detail?: string } | null = null
+        try {
+          data = raw ? JSON.parse(raw) : null
+        } catch {
+          data = null
+        }
+
+        if (!response.ok) {
+          const detail = (data as { detail?: unknown } | null)?.detail
+          const message = Array.isArray(detail)
+            ? detail.map((item) => (item as { msg?: string })?.msg || JSON.stringify(item)).join(" | ")
+            : typeof detail === "string"
+              ? detail
+              : detail
+                ? JSON.stringify(detail)
+                : raw || "Aluno nao encontrado."
+          setStudentInfo(null)
+          setStudentError(message)
+          return
+        }
+
+        const resolved = data as AdminUser
+        if (resolved.role !== "STUDENT") {
+          setStudentInfo(null)
+          setStudentError("Aluno nao encontrado.")
+          return
+        }
+        setStudentInfo(resolved)
+      } catch {
+        setStudentInfo(null)
+        setStudentError("Falha ao conectar com o servidor.")
+      } finally {
+        setIsLoadingStudent(false)
+      }
+    }
+
+    loadStudent()
+  }, [studentId, API_BASE_URL, ACCESS_TOKEN_KEY])
+
+  const studentAttempts = useMemo(() => {
+    if (!studentInfo) return []
+    return tentativasExames.filter((attempt) => attempt.userId === studentInfo.id)
+  }, [tentativasExames, studentInfo])
 
   const selectedAttempt = useMemo(() => {
     if (!selectedAttemptId) return studentAttempts[0] || null
@@ -156,18 +228,16 @@ export default function StudentAdminPage() {
   }, [listaCursos, studentAttempts])
 
   const handleCertificateUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    if (!studentInfo) return
     const file = event.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
       if (typeof reader.result !== "string") return
-      const certificateCourseId =
-        Number(Object.keys(student.courses).find((id) => student.courses[Number(id)])) ||
-        listaCursos[0]?.id ||
-        0
-      uploadCertificadoExterno(student.id, {
+      const certificateCourseId = listaCursos[0]?.id || 0
+      uploadCertificadoExterno(studentInfo.id, {
         id: Date.now(),
-        userId: student.id,
+        userId: studentInfo.id,
         courseId: certificateCourseId,
         fileUrl: reader.result
       })
@@ -176,22 +246,47 @@ export default function StudentAdminPage() {
   }
 
   const handleEssaySave = (attemptId: number, totalPoints: number) => {
+    if (!studentInfo) return
     const draft = essayDrafts[attemptId]
     const points = Number(draft?.grade || 0)
     const percent = totalPoints > 0 ? Math.round((points / totalPoints) * 100) : 0
-      const resolvedPoints = Number.isFinite(points)
-        ? points
-        : totalPoints > 0
-          ? Number(((percent / 100) * totalPoints).toFixed(2))
-          : 0
-      lancarNota(student.id, attemptId, percent, draft?.feedback, resolvedPoints, totalPoints)
+    const resolvedPoints = Number.isFinite(points)
+      ? points
+      : totalPoints > 0
+        ? Number(((percent / 100) * totalPoints).toFixed(2))
+        : 0
+    lancarNota(studentInfo.id, attemptId, percent, draft?.feedback, resolvedPoints, totalPoints)
   }
 
-  const documents = student.documents || []
-  const certificate = student.certificate
+  const documents = []
+  const certificate = null
   const certificateLabel = certificate?.fileUrl
     ? certificate.fileUrl.split("/").pop() || "Certificado"
     : "Certificado"
+
+  if (isLoadingStudent) {
+    return (
+      <div className="border border-border bg-black p-6 text-xs text-[#6b7a5f]">
+        Carregando aluno...
+      </div>
+    )
+  }
+
+  if (studentError) {
+    return (
+      <div className="border border-border bg-black p-6 text-xs text-red-500">
+        {studentError}
+      </div>
+    )
+  }
+
+  if (!studentInfo) {
+    return (
+      <div className="border border-border bg-black p-6 text-xs text-[#6b7a5f]">
+        Aluno nao encontrado.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -199,11 +294,13 @@ export default function StudentAdminPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Operador</p>
-            <h1 className="text-xl font-bold text-foreground">{student.name}</h1>
-            <p className="text-xs text-[#6b7a5f]">{student.email}</p>
+            <h1 className="text-xl font-bold text-foreground">{studentInfo.full_name}</h1>
+            <p className="text-xs text-[#6b7a5f]">{studentInfo.email}</p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs uppercase tracking-wider text-[#F4511E]">{student.status}</span>
+            <span className="text-xs uppercase tracking-wider text-[#F4511E]">
+              {studentInfo.is_active ? "ativo" : "inativo"}
+            </span>
             <Button
               variant="outline"
               onClick={() => router.push("/admin")}
@@ -222,15 +319,15 @@ export default function StudentAdminPage() {
             <div className="mt-4 space-y-3 text-sm">
               <div>
                 <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">CPF</p>
-                <p className="font-mono text-foreground">{student.cpf || "Nao informado"}</p>
+                <p className="font-mono text-foreground">{studentInfo.cpf || "Nao informado"}</p>
               </div>
               <div>
                 <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">ID</p>
-                <p className="font-mono text-foreground">{String(student.id).padStart(4, "0")}</p>
+                <p className="font-mono text-foreground">{String(studentInfo.id).padStart(4, "0")}</p>
               </div>
               <div>
                 <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Telefone</p>
-                <p className="text-foreground">{student.phone}</p>
+                <p className="text-foreground">{studentInfo.phone || "--"}</p>
               </div>
             </div>
           </div>
@@ -252,14 +349,14 @@ export default function StudentAdminPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        onClick={() => validarDocumentoAluno(student.id, doc.id, "validado")}
+                        onClick={() => validarDocumentoAluno(studentInfo.id, doc.id, "validado")}
                         className="flex-1 bg-[#F4511E] text-black rounded-none text-xs"
                       >
                         Aprovar
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => validarDocumentoAluno(student.id, doc.id, "recusado")}
+                        onClick={() => validarDocumentoAluno(studentInfo.id, doc.id, "recusado")}
                         className="flex-1 border-border rounded-none text-xs"
                       >
                         Recusar
@@ -319,7 +416,7 @@ export default function StudentAdminPage() {
             </div>
             <div className="divide-y divide-border">
               {listaCursos.map((course) => {
-                const isEnabled = Boolean(student.courses[course.id])
+                const isEnabled = false
                 return (
                   <div key={course.id} className="p-3 flex items-center justify-between">
                     <div>
@@ -328,7 +425,7 @@ export default function StudentAdminPage() {
                     </div>
                     <Switch
                       checked={isEnabled}
-                      onCheckedChange={() => liberarCurso(student.id, course.id)}
+                      onCheckedChange={() => liberarCurso(studentInfo.id, course.id)}
                       className="data-[state=checked]:bg-[#F4511E]"
                     />
                   </div>

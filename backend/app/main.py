@@ -3,8 +3,14 @@ from fastapi import FastAPI
 from sqlmodel import Session
 from app.core.database import init_db, engine
 from app.modules.users.models import User
+from app.modules.courses.models import Course, Module, Enrollment
+
 from app.modules.users.utils import create_first_admin
+
+# Importação dos roteadores
 from app.modules.users.routes import router as users_router
+from app.modules.courses.routes import router as courses_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,9 +35,12 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
-app.include_router(users_router)
 
-# Rota de teste simples (Sem roteadores externos por enquanto)
+# Acoplamento dos Módulos
+app.include_router(users_router)
+app.include_router(courses_router)
+
+# Rota de teste simples
 @app.get("/", tags=["Health Check"])
 async def root():
     return {

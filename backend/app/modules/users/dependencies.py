@@ -6,8 +6,8 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.modules.users.models import User, UserRole
 
-# Define o endpoint onde o OAuth2 vai buscar o token (nosso login)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+# Define o URL que o Swagger vai usar para autenticação
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
 
 def get_current_user(
     session: Session = Depends(get_session), 
@@ -15,11 +15,12 @@ def get_current_user(
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Não foi possível validar as credenciais",
+        detail="Credenciais inválidas ou token expirado",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
     try:
-        # Decodifica o payload do JWT
+        # Decifra o Token usando a tua SECRET_KEY
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
@@ -29,18 +30,19 @@ def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    # Busca o usuário no banco para garantir que ele ainda existe/está ativo
+    # Vai ao banco de dados verificar se o utilizador ainda existe e está ativo
     user = session.query(User).filter(User.email == email).first()
+    
     if user is None or not user.is_active:
         raise credentials_exception
         
     return user
 
 def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
-    """Garante que o usuário autenticado tenha permissão de Admin."""
+    """Valida se o utilizador autenticado tem a role de ADMIN."""
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="O usuário não tem privilégios suficientes"
+            detail="Privilégios insuficientes. Acesso restrito a administradores."
         )
     return current_user
