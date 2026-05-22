@@ -55,6 +55,7 @@ export default function StudentAdminPage() {
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<number[]>([])
   const [isLoadingEnrollments, setIsLoadingEnrollments] = useState(false)
   const [isSyncingEnrollments, setIsSyncingEnrollments] = useState(false)
+  const [enrollmentError, setEnrollmentError] = useState("")
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
   const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
@@ -433,6 +434,11 @@ export default function StudentAdminPage() {
             <div className="p-3 border-b border-border text-xs uppercase tracking-wider text-[#6b7a5f]">
               Cursos liberados
             </div>
+            {enrollmentError && (
+              <div className="p-3 bg-red-500/10 border-b border-red-500/30 text-xs text-red-500">
+                {enrollmentError}
+              </div>
+            )}
             <div className="divide-y divide-border">
               {listaCursos.map((course) => {
                 const isEnabled = enrolledCourseIds.includes(course.id)
@@ -447,10 +453,11 @@ export default function StudentAdminPage() {
                       onCheckedChange={async () => {
                         if (!studentInfo) return
                         setIsSyncingEnrollments(true)
+                        setEnrollmentError("")
                         try {
                           const token = localStorage.getItem(ACCESS_TOKEN_KEY)
                           if (!token) {
-                            console.error("Token not found")
+                            setEnrollmentError("Token nao encontrado. Faca login novamente.")
                             return
                           }
 
@@ -471,10 +478,25 @@ export default function StudentAdminPage() {
                           if (response.ok) {
                             setEnrolledCourseIds(newEnrolledIds)
                           } else {
-                            console.error("Failed to sync enrollments")
+                            const raw = await response.text()
+                            let data: { detail?: unknown } | null = null
+                            try {
+                              data = raw ? JSON.parse(raw) : null
+                            } catch {
+                              data = null
+                            }
+                            const detail = (data as { detail?: unknown } | null)?.detail
+                            const message = Array.isArray(detail)
+                              ? detail.map((item) => (item as { msg?: string })?.msg || JSON.stringify(item)).join(" | ")
+                              : typeof detail === "string"
+                                ? detail
+                                : detail
+                                  ? JSON.stringify(detail)
+                                  : raw || "Erro ao sincronizar inscricoes."
+                            setEnrollmentError(message)
                           }
                         } catch (error) {
-                          console.error("Error syncing enrollments:", error)
+                          setEnrollmentError("Falha ao conectar com o servidor.")
                         } finally {
                           setIsSyncingEnrollments(false)
                         }

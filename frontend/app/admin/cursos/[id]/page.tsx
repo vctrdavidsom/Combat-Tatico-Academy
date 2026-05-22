@@ -413,6 +413,17 @@ export default function AdminCourseDetailPage() {
         return
       }
 
+      // Validate date range
+      if (newActivity.start_date && newActivity.end_date) {
+        const startDate = new Date(newActivity.start_date)
+        const endDate = new Date(newActivity.end_date)
+        if (endDate <= startDate) {
+          setActivityError("A data limite deve ser posterior a data de inicio.")
+          setIsCreatingActivity(false)
+          return
+        }
+      }
+
       const payload = {
         title: newActivity.title,
         description: newActivity.description || null,
