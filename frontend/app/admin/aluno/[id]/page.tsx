@@ -44,7 +44,6 @@ export default function StudentAdminPage() {
   const {
     listaCursos,
     tentativasExames,
-    liberarCurso,
     lancarNota,
     uploadCertificadoExterno,
     validarDocumentoAluno
@@ -53,6 +52,10 @@ export default function StudentAdminPage() {
   const [studentInfo, setStudentInfo] = useState<AdminUser | null>(null)
   const [studentError, setStudentError] = useState("")
   const [isLoadingStudent, setIsLoadingStudent] = useState(false)
+  const [enrolledCourseIds, setEnrolledCourseIds] = useState<number[]>([])
+  const [isLoadingEnrollments, setIsLoadingEnrollments] = useState(false)
+  const [isSyncingEnrollments, setIsSyncingEnrollments] = useState(false)
+  const [enrollmentError, setEnrollmentError] = useState("")
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
   const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
@@ -106,6 +109,30 @@ export default function StudentAdminPage() {
           return
         }
         setStudentInfo(resolved)
+
+        // Load enrolled courses
+        setIsLoadingEnrollments(true)
+        try {
+          const enrollResponse = await fetch(`${API_BASE_URL}/users/admin/${studentId}/courses`, {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          })
+
+          if (enrollResponse.ok) {
+            const enrolledIds = await enrollResponse.json()
+            if (Array.isArray(enrolledIds)) {
+              setEnrolledCourseIds(enrolledIds)
+            } else {
+              setEnrollmentError("Erro ao carregar cursos liberados: formato de resposta invalido.")
+              setEnrolledCourseIds([])
+            }
+          } else {
+            setEnrollmentError("Erro ao carregar cursos liberados.")
+          }
+        } finally {
+          setIsLoadingEnrollments(false)
+        }
       } catch {
         setStudentInfo(null)
         setStudentError("Falha ao conectar com o servidor.")
@@ -414,9 +441,14 @@ export default function StudentAdminPage() {
             <div className="p-3 border-b border-border text-xs uppercase tracking-wider text-[#6b7a5f]">
               Cursos liberados
             </div>
+            {enrollmentError && (
+              <div className="p-3 bg-red-500/10 border-b border-red-500/30 text-xs text-red-500">
+                {enrollmentError}
+              </div>
+            )}
             <div className="divide-y divide-border">
               {listaCursos.map((course) => {
-                const isEnabled = false
+                const isEnabled = enrolledCourseIds.includes(course.id)
                 return (
                   <div key={course.id} className="p-3 flex items-center justify-between">
                     <div>
@@ -425,7 +457,58 @@ export default function StudentAdminPage() {
                     </div>
                     <Switch
                       checked={isEnabled}
-                      onCheckedChange={() => liberarCurso(studentInfo.id, course.id)}
+                      onCheckedChange={async () => {
+                        if (!studentInfo) return
+                        setIsSyncingEnrollments(true)
+                        setEnrollmentError("")
+                        try {
+                          const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+                          if (!token) {
+                            setEnrollmentError("Token nao encontrado. Faca login novamente.")
+                            return
+                          }
+
+                          // Toggle the course enrollment
+                          const newEnrolledIds = isEnabled
+                            ? enrolledCourseIds.filter(enrolledId => enrolledId !== course.id)
+                            : [...enrolledCourseIds, course.id]
+
+                          const response = await fetch(`${API_BASE_URL}/users/admin/${studentInfo.id}/courses/sync`, {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ course_ids: newEnrolledIds })
+                          })
+
+                          if (response.ok) {
+                            setEnrolledCourseIds(newEnrolledIds)
+                          } else {
+                            const raw = await response.text()
+                            let data: { detail?: unknown } | null = null
+                            try {
+                              data = raw ? JSON.parse(raw) : null
+                            } catch {
+                              data = null
+                            }
+                            const detail = (data as { detail?: unknown } | null)?.detail
+                            const message = Array.isArray(detail)
+                              ? detail.map((item) => (item as { msg?: string })?.msg || JSON.stringify(item)).join(" | ")
+                              : typeof detail === "string"
+                                ? detail
+                                : detail
+                                  ? JSON.stringify(detail)
+                                  : raw || "Erro ao sincronizar inscricoes."
+                            setEnrollmentError(message)
+                          }
+                        } catch (error) {
+                          setEnrollmentError("Falha ao conectar com o servidor.")
+                        } finally {
+                          setIsSyncingEnrollments(false)
+                        }
+                      }}
+                      disabled={isSyncingEnrollments || isLoadingEnrollments}
                       className="data-[state=checked]:bg-[#F4511E]"
                     />
                   </div>

@@ -27,6 +27,29 @@ type ApiModule = {
   description?: string | null
   order: number
   course_id: number
+  exams?: ApiExam[]
+  lessons?: ApiLesson[]
+}
+
+type ApiExam = {
+  id: number
+  title: string
+  description?: string | null
+  passing_score: number
+  time_limit_minutes?: number | null
+  start_date?: string | null
+  end_date?: string | null
+  is_active: boolean
+  module_id: number
+}
+
+type ApiLesson = {
+  id: number
+  title: string
+  content_url: string
+  order: number
+  is_active: boolean
+  module_id: number
 }
 
 type ApiCourse = {
@@ -113,6 +136,26 @@ export default function AdminCourseDetailPage() {
   const [moduleError, setModuleError] = useState("")
   const [isDeletingCourse, setIsDeletingCourse] = useState(false)
   const [deleteError, setDeleteError] = useState("")
+  const [showAddActivityModal, setShowAddActivityModal] = useState(false)
+  const [selectedModuleForActivity, setSelectedModuleForActivity] = useState<number | null>(null)
+  const [newActivity, setNewActivity] = useState({
+    title: "",
+    description: "",
+    passing_score: 70,
+    time_limit_minutes: null as number | null,
+    start_date: "",
+    end_date: ""
+  })
+  const [isCreatingActivity, setIsCreatingActivity] = useState(false)
+  const [activityError, setActivityError] = useState("")
+  const [showAddLessonModal, setShowAddLessonModal] = useState(false)
+  const [selectedModuleForLesson, setSelectedModuleForLesson] = useState<number | null>(null)
+  const [newLesson, setNewLesson] = useState({
+    title: "",
+    content_url: ""
+  })
+  const [isCreatingLesson, setIsCreatingLesson] = useState(false)
+  const [lessonError, setLessonError] = useState("")
 
   const modules = useMemo(() => {
     const list = course?.modules ?? []
@@ -373,6 +416,257 @@ export default function AdminCourseDetailPage() {
       )
     } catch {
       setModuleError("Falha ao conectar com o servidor.")
+    }
+  }
+
+  const handleAddActivity = async () => {
+    if (!course || !selectedModuleForActivity || !newActivity.title || isCreatingActivity) return
+    setActivityError("")
+    setIsCreatingActivity(true)
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setActivityError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      // Validate date range
+      if (newActivity.start_date && newActivity.end_date) {
+        const startDate = new Date(newActivity.start_date)
+        const endDate = new Date(newActivity.end_date)
+        if (endDate < startDate) {
+          setActivityError("A data limite deve ser posterior a data de inicio.")
+          setIsCreatingActivity(false)
+          return
+        }
+      }
+
+      const payload = {
+        title: newActivity.title,
+        description: newActivity.description || null,
+        passing_score: newActivity.passing_score,
+        time_limit_minutes: newActivity.time_limit_minutes,
+        start_date: newActivity.start_date ? new Date(newActivity.start_date).toISOString() : null,
+        end_date: newActivity.end_date ? new Date(newActivity.end_date).toISOString() : null,
+        questions: []
+      }
+
+      const response = await fetch(`${API_BASE_URL}/exams/admin/modules/${selectedModuleForActivity}/exams`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const { data, raw } = await readJsonResponse<ApiExam | { detail?: unknown }>(response)
+      if (!response.ok) {
+        setActivityError(resolveApiError(raw, data, "Erro ao criar atividade."))
+        return
+      }
+
+      if (!data || typeof data !== "object") {
+        setActivityError("Resposta invalida ao criar atividade.")
+        return
+      }
+
+      const created = data as ApiExam
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) =>
+                module.id === selectedModuleForActivity
+                  ? {
+                      ...module,
+                      exams: [...(module.exams || []), created]
+                    }
+                  : module
+              )
+            }
+          : prev
+      )
+      setNewActivity({
+        title: "",
+        description: "",
+        passing_score: 70,
+        time_limit_minutes: null,
+        start_date: "",
+        end_date: ""
+      })
+      setSelectedModuleForActivity(null)
+      setShowAddActivityModal(false)
+    } catch {
+      setActivityError("Falha ao conectar com o servidor.")
+    } finally {
+      setIsCreatingActivity(false)
+    }
+  }
+
+  const handleDeleteActivity = async (moduleId: number, activityId: number) => {
+    if (!course) return
+    const confirmed = window.confirm("Remover esta atividade?")
+    if (!confirmed) return
+
+    setActivityError("")
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setActivityError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/exams/admin/exams/${activityId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const { data, raw } = await readJsonResponse<{ detail?: unknown }>(response)
+      if (!response.ok) {
+        setActivityError(resolveApiError(raw, data, "Erro ao remover atividade."))
+        return
+      }
+
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) =>
+                module.id === moduleId
+                  ? {
+                      ...module,
+                      exams: (module.exams || []).filter((exam) => exam.id !== activityId)
+                    }
+                  : module
+              )
+            }
+          : prev
+      )
+    } catch {
+      setActivityError("Falha ao conectar com o servidor.")
+    }
+  }
+
+  const handleAddLesson = async () => {
+    if (!course || !selectedModuleForLesson || !newLesson.title || !newLesson.content_url || isCreatingLesson) return
+    setLessonError("")
+    setIsCreatingLesson(true)
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setLessonError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const nextOrder = (course.modules
+        .find((m) => m.id === selectedModuleForLesson)
+        ?.lessons || []).length + 1
+
+      const payload = {
+        title: newLesson.title,
+        content_url: newLesson.content_url,
+        order: nextOrder
+      }
+
+      const response = await fetch(`${API_BASE_URL}/lessons/admin/modules/${selectedModuleForLesson}/lessons`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const { data, raw } = await readJsonResponse<ApiLesson | { detail?: unknown }>(response)
+      if (!response.ok) {
+        setLessonError(resolveApiError(raw, data, "Erro ao criar material."))
+        return
+      }
+
+      if (!data || typeof data !== "object") {
+        setLessonError("Resposta invalida ao criar material.")
+        return
+      }
+
+      const created = data as ApiLesson
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) =>
+                module.id === selectedModuleForLesson
+                  ? {
+                      ...module,
+                      lessons: [...(module.lessons || []), created]
+                    }
+                  : module
+              )
+            }
+          : prev
+      )
+      setNewLesson({
+        title: "",
+        content_url: ""
+      })
+      setSelectedModuleForLesson(null)
+      setShowAddLessonModal(false)
+    } catch {
+      setLessonError("Falha ao conectar com o servidor.")
+    } finally {
+      setIsCreatingLesson(false)
+    }
+  }
+
+  const handleDeleteLesson = async (moduleId: number, lessonId: number) => {
+    if (!course) return
+    const confirmed = window.confirm("Remover este material?")
+    if (!confirmed) return
+
+    setLessonError("")
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setLessonError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/lessons/admin/lessons/${lessonId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const { data, raw } = await readJsonResponse<{ detail?: unknown }>(response)
+      if (!response.ok) {
+        setLessonError(resolveApiError(raw, data, "Erro ao remover material."))
+        return
+      }
+
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) =>
+                module.id === moduleId
+                  ? {
+                      ...module,
+                      lessons: (module.lessons || []).filter((lesson) => lesson.id !== lessonId)
+                    }
+                  : module
+              )
+            }
+          : prev
+      )
+    } catch {
+      setLessonError("Falha ao conectar com o servidor.")
     }
   }
 
@@ -649,8 +943,96 @@ export default function AdminCourseDetailPage() {
                 </div>
 
                 {expandedModules[module.id] && (
-                  <div className="border-t border-border p-4 text-sm text-[#6b7a5f]">
-                    {module.description || "Sem descricao."}
+                  <div className="border-t border-border p-4 space-y-4">
+                    <div>
+                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">Descricao</p>
+                      <p className="text-sm text-foreground">{module.description || "Sem descricao."}</p>
+                    </div>
+
+                    <div className="border-t border-border pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-bold text-foreground">Atividades</h4>
+                        <Button
+                          onClick={() => {
+                            setSelectedModuleForActivity(module.id)
+                            setShowAddActivityModal(true)
+                          }}
+                          className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none text-xs"
+                          size="sm"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Nova Atividade
+                        </Button>
+                      </div>
+
+                      {(module.exams || []).length === 0 ? (
+                        <p className="text-xs text-[#6b7a5f]">Nenhuma atividade neste modulo.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {(module.exams || []).map((exam) => (
+                            <div key={exam.id} className="border border-border p-3 flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{exam.title}</p>
+                                {exam.start_date && (
+                                  <p className="text-xs text-[#6b7a5f]">
+                                    Inicio: {new Date(exam.start_date).toLocaleDateString("pt-BR")}
+                                  </p>
+                                )}
+                                {exam.end_date && (
+                                  <p className="text-xs text-[#6b7a5f]">
+                                    Fim: {new Date(exam.end_date).toLocaleDateString("pt-BR")}
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleDeleteActivity(module.id, exam.id)}
+                                className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors ml-2"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-border pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-bold text-foreground">Materiais</h4>
+                        <Button
+                          onClick={() => {
+                            setSelectedModuleForLesson(module.id)
+                            setShowAddLessonModal(true)
+                          }}
+                          className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none text-xs"
+                          size="sm"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Novo Material
+                        </Button>
+                      </div>
+
+                      {(module.lessons || []).length === 0 ? (
+                        <p className="text-xs text-[#6b7a5f]">Nenhum material neste modulo.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {(module.lessons || []).map((lesson) => (
+                            <div key={lesson.id} className="border border-border p-3 flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{lesson.title}</p>
+                                <p className="text-xs text-[#6b7a5f] truncate">URL: {lesson.content_url}</p>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteLesson(module.id, lesson.id)}
+                                className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors ml-2"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -724,6 +1106,210 @@ export default function AdminCourseDetailPage() {
                 className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
               >
                 {isCreatingModule ? "Criando..." : "Criar Modulo"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Activity Modal */}
+      {showAddActivityModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-card border border-border w-full max-w-lg my-8 max-h-[calc(100vh-2rem)] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <Plus className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Nova Atividade</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Adicionar atividade ao modulo
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddActivityModal(false)}
+                className="text-[#6b7a5f] hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 min-h-0 overflow-y-auto">
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Titulo da Atividade *
+                </label>
+                <Input
+                  value={newActivity.title}
+                  onChange={(event) => setNewActivity({ ...newActivity, title: event.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Descricao
+                </label>
+                <Textarea
+                  value={newActivity.description}
+                  onChange={(event) =>
+                    setNewActivity({ ...newActivity, description: event.target.value })
+                  }
+                  className="border-border bg-secondary rounded-none"
+                  rows={3}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Nota de Aprovacao
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={newActivity.passing_score}
+                    onChange={(event) =>
+                      setNewActivity({ ...newActivity, passing_score: Number(event.target.value) })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Limite de Tempo (min)
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={newActivity.time_limit_minutes ?? ""}
+                    onChange={(event) =>
+                      setNewActivity({
+                        ...newActivity,
+                        time_limit_minutes: event.target.value ? Number(event.target.value) : null
+                      })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                    placeholder="Sem limite"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Data de Inicio
+                  </label>
+                  <Input
+                    type="datetime-local"
+                    value={newActivity.start_date}
+                    onChange={(event) =>
+                      setNewActivity({ ...newActivity, start_date: event.target.value })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                    Data Limite
+                  </label>
+                  <Input
+                    type="datetime-local"
+                    value={newActivity.end_date}
+                    onChange={(event) =>
+                      setNewActivity({ ...newActivity, end_date: event.target.value })
+                    }
+                    className="border-border bg-secondary rounded-none"
+                  />
+                </div>
+              </div>
+              {activityError && <p className="text-xs text-red-500">{activityError}</p>}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => setShowAddActivityModal(false)}
+                className="flex-1 border-border rounded-none"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAddActivity}
+                disabled={!newActivity.title || isCreatingActivity}
+                className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
+              >
+                {isCreatingActivity ? "Criando..." : "Criar Atividade"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Lesson Modal */}
+      {showAddLessonModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-card border border-border w-full max-w-lg my-8 max-h-[calc(100vh-2rem)] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <Plus className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Novo Material</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Adicionar material ao modulo
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddLessonModal(false)}
+                className="text-[#6b7a5f] hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 min-h-0 overflow-y-auto">
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Titulo do Material *
+                </label>
+                <Input
+                  value={newLesson.title}
+                  onChange={(event) => setNewLesson({ ...newLesson, title: event.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  URL do Conteudo *
+                </label>
+                <Input
+                  type="url"
+                  value={newLesson.content_url}
+                  onChange={(event) => setNewLesson({ ...newLesson, content_url: event.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                  placeholder="https://exemplo.com/material"
+                />
+              </div>
+              {lessonError && <p className="text-xs text-red-500">{lessonError}</p>}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => setShowAddLessonModal(false)}
+                className="flex-1 border-border rounded-none"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAddLesson}
+                disabled={!newLesson.title || !newLesson.content_url || isCreatingLesson}
+                className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
+              >
+                {isCreatingLesson ? "Criando..." : "Criar Material"}
               </Button>
             </div>
           </div>

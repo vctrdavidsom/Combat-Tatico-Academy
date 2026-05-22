@@ -28,6 +28,8 @@ class Exam(SQLModel, table=True):
     description: Optional[str] = None
     passing_score: float = Field(default=70.0)  # Nota mínima para aprovação (0-100)
     time_limit_minutes: Optional[int] = None  # Tempo limite em minutos (None = sem limite)
+    start_date: Optional[datetime] = None  # Data de início da atividade
+    end_date: Optional[datetime] = None  # Data limite (entrega/participação)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     

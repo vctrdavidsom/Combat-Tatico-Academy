@@ -85,6 +85,8 @@ class ExamCreate(BaseModel):
     description: Optional[str] = None
     passing_score: Optional[float] = 70.0
     time_limit_minutes: Optional[int] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     questions: List[QuestionCreate] = []
 
 
@@ -93,6 +95,8 @@ class ExamUpdate(BaseModel):
     description: Optional[str] = None
     passing_score: Optional[float] = None
     time_limit_minutes: Optional[int] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
 
 
@@ -102,6 +106,8 @@ class ExamPublic(BaseModel):
     description: Optional[str]
     passing_score: float
     time_limit_minutes: Optional[int]
+    start_date: Optional[datetime]
+    end_date: Optional[datetime]
     is_active: bool
     module_id: int
 
@@ -121,6 +127,8 @@ class ExamStudentPublic(BaseModel):
     description: Optional[str]
     passing_score: float
     time_limit_minutes: Optional[int]
+    start_date: Optional[datetime]
+    end_date: Optional[datetime]
     questions: List[QuestionStudentPublic] = []
 
     class Config:

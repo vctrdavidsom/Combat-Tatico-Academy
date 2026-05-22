@@ -5,7 +5,6 @@ import { usePathname, useSearchParams } from "next/navigation"
 import {
   BookOpen,
   ClipboardCheck,
-  FolderOpen,
   Shield,
   Users
 } from "lucide-react"
@@ -14,7 +13,6 @@ import { Header } from "@/components/header"
 const navItems = [
   { href: "/admin?view=alunos", label: "Gestao de Alunos", icon: Users },
   { href: "/admin/cursos", label: "Gestao de Cursos", icon: BookOpen },
-  { href: "/admin/biblioteca", label: "Biblioteca Global", icon: FolderOpen },
   { href: "/admin/revisao", label: "Central de Correcao", icon: ClipboardCheck }
 ]
 
