@@ -44,7 +44,6 @@ export default function StudentAdminPage() {
   const {
     listaCursos,
     tentativasExames,
-    liberarCurso,
     lancarNota,
     uploadCertificadoExterno,
     validarDocumentoAluno
@@ -53,6 +52,9 @@ export default function StudentAdminPage() {
   const [studentInfo, setStudentInfo] = useState<AdminUser | null>(null)
   const [studentError, setStudentError] = useState("")
   const [isLoadingStudent, setIsLoadingStudent] = useState(false)
+  const [enrolledCourseIds, setEnrolledCourseIds] = useState<number[]>([])
+  const [isLoadingEnrollments, setIsLoadingEnrollments] = useState(false)
+  const [isSyncingEnrollments, setIsSyncingEnrollments] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
   const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
@@ -106,6 +108,23 @@ export default function StudentAdminPage() {
           return
         }
         setStudentInfo(resolved)
+
+        // Load enrolled courses
+        setIsLoadingEnrollments(true)
+        try {
+          const enrollResponse = await fetch(`${API_BASE_URL}/users/admin/${studentId}/courses`, {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          })
+
+          if (enrollResponse.ok) {
+            const enrolledIds = await enrollResponse.json()
+            setEnrolledCourseIds(Array.isArray(enrolledIds) ? enrolledIds : [])
+          }
+        } finally {
+          setIsLoadingEnrollments(false)
+        }
       } catch {
         setStudentInfo(null)
         setStudentError("Falha ao conectar com o servidor.")
@@ -416,7 +435,7 @@ export default function StudentAdminPage() {
             </div>
             <div className="divide-y divide-border">
               {listaCursos.map((course) => {
-                const isEnabled = false
+                const isEnabled = enrolledCourseIds.includes(course.id)
                 return (
                   <div key={course.id} className="p-3 flex items-center justify-between">
                     <div>
@@ -425,7 +444,42 @@ export default function StudentAdminPage() {
                     </div>
                     <Switch
                       checked={isEnabled}
-                      onCheckedChange={() => liberarCurso(studentInfo.id, course.id)}
+                      onCheckedChange={async () => {
+                        if (!studentInfo) return
+                        setIsSyncingEnrollments(true)
+                        try {
+                          const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+                          if (!token) {
+                            console.error("Token not found")
+                            return
+                          }
+
+                          // Toggle the course enrollment
+                          const newEnrolledIds = isEnabled
+                            ? enrolledCourseIds.filter(id => id !== course.id)
+                            : [...enrolledCourseIds, course.id]
+
+                          const response = await fetch(`${API_BASE_URL}/users/admin/${studentInfo.id}/courses/sync`, {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: `Bearer ${token}`
+                            },
+                            body: JSON.stringify({ course_ids: newEnrolledIds })
+                          })
+
+                          if (response.ok) {
+                            setEnrolledCourseIds(newEnrolledIds)
+                          } else {
+                            console.error("Failed to sync enrollments")
+                          }
+                        } catch (error) {
+                          console.error("Error syncing enrollments:", error)
+                        } finally {
+                          setIsSyncingEnrollments(false)
+                        }
+                      }}
+                      disabled={isSyncingEnrollments || isLoadingEnrollments}
                       className="data-[state=checked]:bg-[#F4511E]"
                     />
                   </div>

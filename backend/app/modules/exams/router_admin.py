@@ -35,6 +35,8 @@ def create_exam(
         description=exam_in.description,
         passing_score=exam_in.passing_score,
         time_limit_minutes=exam_in.time_limit_minutes,
+        start_date=exam_in.start_date,
+        end_date=exam_in.end_date,
         module_id=module_id
     )
     session.add(db_exam)
