@@ -121,7 +121,14 @@ export default function StudentAdminPage() {
 
           if (enrollResponse.ok) {
             const enrolledIds = await enrollResponse.json()
-            setEnrolledCourseIds(Array.isArray(enrolledIds) ? enrolledIds : [])
+            if (Array.isArray(enrolledIds)) {
+              setEnrolledCourseIds(enrolledIds)
+            } else {
+              setEnrollmentError("Erro ao carregar cursos liberados: formato de resposta invalido.")
+              setEnrolledCourseIds([])
+            }
+          } else {
+            setEnrollmentError("Erro ao carregar cursos liberados.")
           }
         } finally {
           setIsLoadingEnrollments(false)
