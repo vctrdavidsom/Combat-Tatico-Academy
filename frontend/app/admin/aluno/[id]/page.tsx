@@ -470,7 +470,7 @@ export default function StudentAdminPage() {
 
                           // Toggle the course enrollment
                           const newEnrolledIds = isEnabled
-                            ? enrolledCourseIds.filter(id => id !== course.id)
+                            ? enrolledCourseIds.filter(enrolledId => enrolledId !== course.id)
                             : [...enrolledCourseIds, course.id]
 
                           const response = await fetch(`${API_BASE_URL}/users/admin/${studentInfo.id}/courses/sync`, {
