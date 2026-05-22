@@ -28,6 +28,7 @@ type ApiModule = {
   order: number
   course_id: number
   exams?: ApiExam[]
+  lessons?: ApiLesson[]
 }
 
 type ApiExam = {
@@ -38,6 +39,15 @@ type ApiExam = {
   time_limit_minutes?: number | null
   start_date?: string | null
   end_date?: string | null
+  is_active: boolean
+  module_id: number
+}
+
+type ApiLesson = {
+  id: number
+  title: string
+  content_url: string
+  order: number
   is_active: boolean
   module_id: number
 }
@@ -138,6 +148,14 @@ export default function AdminCourseDetailPage() {
   })
   const [isCreatingActivity, setIsCreatingActivity] = useState(false)
   const [activityError, setActivityError] = useState("")
+  const [showAddLessonModal, setShowAddLessonModal] = useState(false)
+  const [selectedModuleForLesson, setSelectedModuleForLesson] = useState<number | null>(null)
+  const [newLesson, setNewLesson] = useState({
+    title: "",
+    content_url: ""
+  })
+  const [isCreatingLesson, setIsCreatingLesson] = useState(false)
+  const [lessonError, setLessonError] = useState("")
 
   const modules = useMemo(() => {
     const list = course?.modules ?? []
@@ -534,6 +552,124 @@ export default function AdminCourseDetailPage() {
     }
   }
 
+  const handleAddLesson = async () => {
+    if (!course || !selectedModuleForLesson || !newLesson.title || !newLesson.content_url || isCreatingLesson) return
+    setLessonError("")
+    setIsCreatingLesson(true)
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setLessonError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const nextOrder = (course.modules
+        .find((m) => m.id === selectedModuleForLesson)
+        ?.lessons || []).length + 1
+
+      const payload = {
+        title: newLesson.title,
+        content_url: newLesson.content_url,
+        order: nextOrder
+      }
+
+      const response = await fetch(`${API_BASE_URL}/lessons/admin/modules/${selectedModuleForLesson}/lessons`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const { data, raw } = await readJsonResponse<ApiLesson | { detail?: unknown }>(response)
+      if (!response.ok) {
+        setLessonError(resolveApiError(raw, data, "Erro ao criar material."))
+        return
+      }
+
+      if (!data || typeof data !== "object") {
+        setLessonError("Resposta invalida ao criar material.")
+        return
+      }
+
+      const created = data as ApiLesson
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) =>
+                module.id === selectedModuleForLesson
+                  ? {
+                      ...module,
+                      lessons: [...(module.lessons || []), created]
+                    }
+                  : module
+              )
+            }
+          : prev
+      )
+      setNewLesson({
+        title: "",
+        content_url: ""
+      })
+      setSelectedModuleForLesson(null)
+      setShowAddLessonModal(false)
+    } catch {
+      setLessonError("Falha ao conectar com o servidor.")
+    } finally {
+      setIsCreatingLesson(false)
+    }
+  }
+
+  const handleDeleteLesson = async (moduleId: number, lessonId: number) => {
+    if (!course) return
+    const confirmed = window.confirm("Remover este material?")
+    if (!confirmed) return
+
+    setLessonError("")
+
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setLessonError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/lessons/admin/lessons/${lessonId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const { data, raw } = await readJsonResponse<{ detail?: unknown }>(response)
+      if (!response.ok) {
+        setLessonError(resolveApiError(raw, data, "Erro ao remover material."))
+        return
+      }
+
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) =>
+                module.id === moduleId
+                  ? {
+                      ...module,
+                      lessons: (module.lessons || []).filter((lesson) => lesson.id !== lessonId)
+                    }
+                  : module
+              )
+            }
+          : prev
+      )
+    } catch {
+      setLessonError("Falha ao conectar com o servidor.")
+    }
+  }
+
   const handleDeleteCourse = async () => {
     if (!course || isDeletingCourse) return
     const confirmed = window.confirm("Tem certeza que deseja excluir este curso?")
@@ -859,6 +995,44 @@ export default function AdminCourseDetailPage() {
                         </div>
                       )}
                     </div>
+
+                    <div className="border-t border-border pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-bold text-foreground">Materiais</h4>
+                        <Button
+                          onClick={() => {
+                            setSelectedModuleForLesson(module.id)
+                            setShowAddLessonModal(true)
+                          }}
+                          className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none text-xs"
+                          size="sm"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Novo Material
+                        </Button>
+                      </div>
+
+                      {(module.lessons || []).length === 0 ? (
+                        <p className="text-xs text-[#6b7a5f]">Nenhum material neste modulo.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {(module.lessons || []).map((lesson) => (
+                            <div key={lesson.id} className="border border-border p-3 flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{lesson.title}</p>
+                                <p className="text-xs text-[#6b7a5f] truncate">URL: {lesson.content_url}</p>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteLesson(module.id, lesson.id)}
+                                className="p-2 text-[#6b7a5f] hover:text-red-500 transition-colors ml-2"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1066,6 +1240,76 @@ export default function AdminCourseDetailPage() {
                 className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
               >
                 {isCreatingActivity ? "Criando..." : "Criar Atividade"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Lesson Modal */}
+      {showAddLessonModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-card border border-border w-full max-w-lg my-8 max-h-[calc(100vh-2rem)] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                  <Plus className="h-5 w-5 text-[#F4511E]" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Novo Material</h2>
+                  <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                    Adicionar material ao modulo
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddLessonModal(false)}
+                className="text-[#6b7a5f] hover:text-foreground transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 min-h-0 overflow-y-auto">
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  Titulo do Material *
+                </label>
+                <Input
+                  value={newLesson.title}
+                  onChange={(event) => setNewLesson({ ...newLesson, title: event.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
+                  URL do Conteudo *
+                </label>
+                <Input
+                  type="url"
+                  value={newLesson.content_url}
+                  onChange={(event) => setNewLesson({ ...newLesson, content_url: event.target.value })}
+                  className="border-border bg-secondary rounded-none"
+                  placeholder="https://exemplo.com/material"
+                />
+              </div>
+              {lessonError && <p className="text-xs text-red-500">{lessonError}</p>}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => setShowAddLessonModal(false)}
+                className="flex-1 border-border rounded-none"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAddLesson}
+                disabled={!newLesson.title || !newLesson.content_url || isCreatingLesson}
+                className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
+              >
+                {isCreatingLesson ? "Criando..." : "Criar Material"}
               </Button>
             </div>
           </div>
