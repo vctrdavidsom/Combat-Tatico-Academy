@@ -1,25 +1,69 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import {
-  Award,
-  BookOpen,
-  CheckCircle2,
-  CircleDot,
-  ClipboardList,
-  FileText,
-  Target,
-  UploadCloud,
-  XCircle
-} from "lucide-react"
+import { BookOpen, CircleDot, ClipboardList, Target, UploadCloud } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import {
-  useCombatContext,
-  type Question
-} from "@/contexts/CombatContext"
+
+type ApiQuestion = {
+  id: number
+  type: "multiple" | "essay"
+  prompt: string
+  options?: string[]
+  correct_index?: number | null
+  weight?: number | null
+}
+
+type ApiExam = {
+  id: number
+  title: string
+  type: "activity" | "final"
+  attempt_limit: number
+  total_points?: number | null
+  questions: ApiQuestion[]
+}
+
+type ApiModule = {
+  id: number
+  title: string
+  description?: string | null
+  order: number
+  exams: ApiExam[]
+}
+
+type ApiCourse = {
+  id: number
+  code: string
+  name: string
+  description: string
+  duration: string
+  thumbnail_url?: string | null
+  is_active: boolean
+  modules: ApiModule[]
+  final_exam?: ApiExam | null
+}
+
+type ApiExamLog = {
+  id: number
+  user_id: number
+  exam_id: number
+  course_id?: number | null
+  module_id?: number | null
+  answers: Record<number, string | number>
+  score_percent: number
+  score_points?: number | null
+  total_points?: number | null
+  has_essay: boolean
+  status: "pendente" | "corrigido"
+  result: "apto" | "nao_apto"
+  submitted_at: string
+  attempt_number: number
+  max_attempts?: number | null
+  cut_score?: number | null
+  feedback?: string | null
+}
 
 type AdminUser = {
   id: number
@@ -41,21 +85,54 @@ export default function StudentAdminPage() {
   const params = useParams()
   const router = useRouter()
   const studentId = Number(params.id)
-  const {
-    listaCursos,
-    tentativasExames,
-    liberarCurso,
-    lancarNota,
-    uploadCertificadoExterno,
-    validarDocumentoAluno
-  } = useCombatContext()
-
   const [studentInfo, setStudentInfo] = useState<AdminUser | null>(null)
   const [studentError, setStudentError] = useState("")
   const [isLoadingStudent, setIsLoadingStudent] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null)
+  const [courses, setCourses] = useState<ApiCourse[]>([])
+  const [examLogs, setExamLogs] = useState<ApiExamLog[]>([])
+  const [enrolledCourseIds, setEnrolledCourseIds] = useState<number[]>([])
+  const [isLoadingData, setIsLoadingData] = useState(false)
+  const [dataError, setDataError] = useState("")
   const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
+
+  const readJsonResponse = async <T,>(response: Response) => {
+    const raw = await response.text()
+    if (!raw) {
+      return { data: null as T | null, raw: "" }
+    }
+    try {
+      return { data: JSON.parse(raw) as T, raw }
+    } catch {
+      return { data: null as T | null, raw }
+    }
+  }
+
+  const resolveApiError = (raw: string, data: unknown, fallback: string) => {
+    const detail = (data as { detail?: unknown } | null)?.detail
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => (item as { msg?: string })?.msg || JSON.stringify(item))
+        .join(" | ")
+    }
+    if (typeof detail === "string") {
+      return detail
+    }
+    if (detail) {
+      return JSON.stringify(detail)
+    }
+    return raw || fallback
+  }
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return "--"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return new Intl.DateTimeFormat("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short"
+    }).format(date)
+  }
 
   useEffect(() => {
     if (!studentId) return
@@ -117,10 +194,99 @@ export default function StudentAdminPage() {
     loadStudent()
   }, [studentId, API_BASE_URL, ACCESS_TOKEN_KEY])
 
+  useEffect(() => {
+    if (!studentId) return
+
+    const loadData = async () => {
+      setDataError("")
+      setIsLoadingData(true)
+      try {
+        const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+        if (!token) {
+          setDataError("Token nao encontrado. Faca login novamente.")
+          setCourses([])
+          setExamLogs([])
+          setEnrolledCourseIds([])
+          return
+        }
+
+        const [coursesResponse, enrolledResponse, logsResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/courses/admin/courses`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/users/admin/${studentId}/courses`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/exams/admin/logs?user_id=${studentId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ])
+
+        const coursesRaw = await coursesResponse.text()
+        const enrolledRaw = await enrolledResponse.text()
+        const logsRaw = await logsResponse.text()
+
+        if (!coursesResponse.ok) {
+          setDataError(coursesRaw || "Erro ao carregar cursos.")
+          setCourses([])
+        } else {
+          const listData = coursesRaw ? JSON.parse(coursesRaw) : []
+          const list = Array.isArray(listData) ? listData : []
+          const detailResponses = await Promise.all(
+            list.map((course: { id: number }) =>
+              fetch(`${API_BASE_URL}/courses/admin/courses/${course.id}`, {
+                headers: { Authorization: `Bearer ${token}` }
+              })
+            )
+          )
+          const detailData = await Promise.all(
+            detailResponses.map(async (res) => ({ ok: res.ok, raw: await res.text() }))
+          )
+          const detailed = detailData
+            .filter((item) => item.ok)
+            .map((item) => (item.raw ? JSON.parse(item.raw) : null))
+            .filter(Boolean) as ApiCourse[]
+          setCourses(detailed)
+        }
+
+        if (!enrolledResponse.ok) {
+          setDataError((prev) => prev || enrolledRaw || "Erro ao carregar matriculas.")
+          setEnrolledCourseIds([])
+        } else {
+          const enrolledData = enrolledRaw ? JSON.parse(enrolledRaw) : []
+          setEnrolledCourseIds(Array.isArray(enrolledData) ? enrolledData : [])
+        }
+
+        if (!logsResponse.ok) {
+          setDataError((prev) => prev || logsRaw || "Erro ao carregar atividades.")
+          setExamLogs([])
+        } else {
+          const logsData = logsRaw ? JSON.parse(logsRaw) : []
+          setExamLogs(Array.isArray(logsData) ? logsData : [])
+        }
+      } catch {
+        setDataError("Falha ao conectar com o servidor.")
+        setCourses([])
+        setExamLogs([])
+        setEnrolledCourseIds([])
+      } finally {
+        setIsLoadingData(false)
+      }
+    }
+
+    loadData()
+  }, [studentId, API_BASE_URL, ACCESS_TOKEN_KEY])
+
   const studentAttempts = useMemo(() => {
-    if (!studentInfo) return []
-    return tentativasExames.filter((attempt) => attempt.userId === studentInfo.id)
-  }, [tentativasExames, studentInfo])
+    return [...examLogs].sort((a, b) => {
+      const aTime = new Date(a.submitted_at).getTime()
+      const bTime = new Date(b.submitted_at).getTime()
+      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
+        return 0
+      }
+      return aTime - bTime
+    })
+  }, [examLogs])
 
   const selectedAttempt = useMemo(() => {
     if (!selectedAttemptId) return studentAttempts[0] || null
@@ -130,35 +296,36 @@ export default function StudentAdminPage() {
   const buildAttemptContext = (attemptId: number) => {
     const attempt = studentAttempts.find((item) => item.id === attemptId)
     if (!attempt) return null
-    const course = listaCursos.find((item) => item.id === attempt.courseId)
+    const course = courses.find((item) => item.id === attempt.course_id)
     if (!course) return null
 
-    if (attempt.examType === "final") {
+    if (course.final_exam && course.final_exam.id === attempt.exam_id) {
       return {
         courseName: course.name,
         moduleName: "Exame Final",
-        activityName: course.finalExam?.title || attempt.title,
-        questions: course.finalExam?.questions || []
+        activityName: course.final_exam.title,
+        questions: course.final_exam.questions || [],
+        totalPoints: course.final_exam.total_points
       }
     }
 
     const module =
-      course.modules.find((item) => item.id === attempt.moduleId) ||
-      course.modules.find((item) => item.exams.some((exam) => exam.id === attempt.examId))
-    const item = module?.exams.find((exam) => exam.id === attempt.examId)
+      course.modules.find((item) => item.id === attempt.module_id) ||
+      course.modules.find((item) => item.exams.some((exam) => exam.id === attempt.exam_id))
+    const item = module?.exams.find((exam) => exam.id === attempt.exam_id)
     return {
       courseName: course.name,
-      moduleName: module?.name,
-      activityName: item?.title || attempt.title,
+      moduleName: module?.title,
+      activityName: item?.title || "Atividade",
       questions: item?.questions || [],
-      totalPoints: item?.totalPoints
+      totalPoints: item?.total_points
     }
   }
 
-  const sumQuestionPoints = (questions: Question[]) =>
+  const sumQuestionPoints = (questions: ApiQuestion[]) =>
     Number(questions.reduce((sum, question) => sum + (question.weight ?? 1), 0).toFixed(2))
 
-  const sumObjectivePoints = (questions: Question[], answers: Record<number, string | number>) => {
+  const sumObjectivePoints = (questions: ApiQuestion[], answers: Record<number, string | number>) => {
     let correct = 0
     let total = 0
     let points = 0
@@ -166,7 +333,9 @@ export default function StudentAdminPage() {
       if (question.type !== "multiple") return
       const weight = question.weight ?? 1
       total += 1
-      if (answers[question.id] === question.correctIndex) {
+      const answerRaw = answers[question.id]
+      const answerValue = typeof answerRaw === "string" ? Number(answerRaw) : answerRaw
+      if (answerValue === question.correct_index) {
         correct += 1
         points += weight
       }
@@ -175,18 +344,15 @@ export default function StudentAdminPage() {
   }
 
   const gradebook = useMemo(() => {
-    return listaCursos.map((course) => ({
+    return courses.map((course) => ({
       course,
       modules: course.modules.map((module) => {
         const activities = module.exams.filter((item) => item.type === "activity")
         const rows = activities.map((item) => {
           const questions = item.questions || []
-          const totalPoints = item.totalPoints ?? sumQuestionPoints(questions)
+          const totalPoints = item.total_points ?? sumQuestionPoints(questions)
           const attempts = studentAttempts.filter(
-            (attempt) =>
-              attempt.courseId === course.id &&
-              attempt.examId === item.id &&
-              attempt.examType === "activity"
+            (attempt) => attempt.course_id === course.id && attempt.exam_id === item.id
           )
           const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
           let earnedPoints = 0
@@ -194,10 +360,10 @@ export default function StudentAdminPage() {
 
           if (lastAttempt) {
             if (lastAttempt.status === "corrigido") {
-              if (typeof lastAttempt.scorePoints === "number") {
-                earnedPoints = Number(lastAttempt.scorePoints.toFixed(1))
+              if (typeof lastAttempt.score_points === "number") {
+                earnedPoints = Number(lastAttempt.score_points.toFixed(1))
               } else {
-                earnedPoints = Number(((lastAttempt.scorePercent / 100) * totalPoints).toFixed(1))
+                earnedPoints = Number(((lastAttempt.score_percent / 100) * totalPoints).toFixed(1))
               }
               statusLabel = lastAttempt.result === "apto" ? "Apto" : "Reprovado"
             } else {
@@ -219,46 +385,108 @@ export default function StudentAdminPage() {
         const moduleTotal = rows.reduce((sum, row) => sum + row.earnedPoints, 0)
         return {
           id: module.id,
-          name: module.name,
+          name: module.title,
           rows,
           moduleTotal: Number(moduleTotal.toFixed(1))
         }
       })
     }))
-  }, [listaCursos, studentAttempts])
+  }, [courses, studentAttempts])
 
-  const handleCertificateUpload = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleCertificateUpload = () => {
+    setDataError("Upload de certificado ainda nao esta disponivel.")
+  }
+
+  const handleEssaySave = async (attemptId: number, totalPoints: number) => {
     if (!studentInfo) return
-    const file = event.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return
-      const certificateCourseId = listaCursos[0]?.id || 0
-      uploadCertificadoExterno(studentInfo.id, {
-        id: Date.now(),
-        userId: studentInfo.id,
-        courseId: certificateCourseId,
-        fileUrl: reader.result
-      })
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+    if (!token) {
+      setDataError("Token nao encontrado. Faca login novamente.")
+      return
     }
-    reader.readAsDataURL(file)
-  }
 
-  const handleEssaySave = (attemptId: number, totalPoints: number) => {
-    if (!studentInfo) return
     const draft = essayDrafts[attemptId]
-    const points = Number(draft?.grade || 0)
-    const percent = totalPoints > 0 ? Math.round((points / totalPoints) * 100) : 0
-    const resolvedPoints = Number.isFinite(points)
-      ? points
-      : totalPoints > 0
-        ? Number(((percent / 100) * totalPoints).toFixed(2))
-        : 0
-    lancarNota(studentInfo.id, attemptId, percent, draft?.feedback, resolvedPoints, totalPoints)
+    const rawPoints = Number(draft?.grade || 0)
+    const safePoints = Number.isFinite(rawPoints) ? rawPoints : 0
+    const clampedPoints = Math.max(0, totalPoints > 0 ? Math.min(safePoints, totalPoints) : safePoints)
+    const percent = totalPoints > 0 ? Math.round((clampedPoints / totalPoints) * 100) : 0
+    const attempt = examLogs.find((item) => item.id === attemptId)
+    const cutScore = attempt?.cut_score ?? 0
+    const result = percent >= cutScore ? "apto" : "nao_apto"
+
+    try {
+      const payload = {
+        score_percent: percent,
+        score_points: Number(clampedPoints.toFixed(2)),
+        total_points: totalPoints,
+        status: "corrigido",
+        result,
+        feedback: draft?.feedback || null
+      }
+      const response = await fetch(`${API_BASE_URL}/exams/admin/logs/${attemptId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      })
+
+      const { data, raw } = await readJsonResponse<ApiExamLog>(response)
+      if (!response.ok) {
+        setDataError(resolveApiError(raw, data, "Falha ao salvar correcao."))
+        return
+      }
+
+      if (data) {
+        setExamLogs((prev) => prev.map((item) => (item.id === attemptId ? data : item)))
+      }
+      setEssayDrafts((prev) => ({
+        ...prev,
+        [attemptId]: { grade: "", feedback: "" }
+      }))
+    } catch {
+      setDataError("Falha ao conectar com o servidor.")
+    }
   }
 
-  const documents = []
+  const handleCourseToggle = async (courseId: number) => {
+    if (!studentInfo) return
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+    if (!token) {
+      setDataError("Token nao encontrado. Faca login novamente.")
+      return
+    }
+
+    const previousIds = enrolledCourseIds
+    const nextIds = previousIds.includes(courseId)
+      ? previousIds.filter((id) => id !== courseId)
+      : [...previousIds, courseId]
+
+    setEnrolledCourseIds(nextIds)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/admin/${studentId}/courses/sync`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ course_ids: nextIds })
+      })
+
+      const { data, raw } = await readJsonResponse<{ message?: string }>(response)
+      if (!response.ok) {
+        setDataError(resolveApiError(raw, data, "Falha ao atualizar cursos."))
+        setEnrolledCourseIds(previousIds)
+      }
+    } catch {
+      setDataError("Falha ao conectar com o servidor.")
+      setEnrolledCourseIds(previousIds)
+    }
+  }
+
+  const documents: Array<{ id: number; name: string; uploadedAt: string; status: string }> = []
   const certificate = null
   const certificateLabel = certificate?.fileUrl
     ? certificate.fileUrl.split("/").pop() || "Certificado"
@@ -312,6 +540,18 @@ export default function StudentAdminPage() {
         </div>
       </div>
 
+      {isLoadingData && (
+        <div className="border border-border bg-black p-3 text-xs text-[#6b7a5f]">
+          Carregando cursos e atividades...
+        </div>
+      )}
+
+      {dataError && (
+        <div className="border border-border bg-black p-3 text-xs text-red-500">
+          {dataError}
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1.1fr_1.9fr]">
         <section className="space-y-6">
           <div className="border border-border bg-black p-4">
@@ -349,14 +589,14 @@ export default function StudentAdminPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        onClick={() => validarDocumentoAluno(studentInfo.id, doc.id, "validado")}
+                        disabled
                         className="flex-1 bg-[#F4511E] text-black rounded-none text-xs"
                       >
                         Aprovar
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => validarDocumentoAluno(studentInfo.id, doc.id, "recusado")}
+                        disabled
                         className="flex-1 border-border rounded-none text-xs"
                       >
                         Recusar
@@ -393,19 +633,13 @@ export default function StudentAdminPage() {
             ) : (
               <p className="mt-3 text-xs text-[#6b7a5f]">Nenhum certificado enviado.</p>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,image/*"
-              className="hidden"
-              onChange={handleCertificateUpload}
-            />
             <Button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={handleCertificateUpload}
               className="mt-4 bg-[#F4511E] text-black rounded-none"
             >
               {certificate ? "Atualizar certificado" : "Upload de certificado"}
             </Button>
+            <p className="mt-2 text-[10px] text-[#6b7a5f]">Integracao pendente com a API.</p>
           </div>
         </section>
 
@@ -415,22 +649,26 @@ export default function StudentAdminPage() {
               Cursos liberados
             </div>
             <div className="divide-y divide-border">
-              {listaCursos.map((course) => {
-                const isEnabled = false
-                return (
-                  <div key={course.id} className="p-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{course.code}</p>
-                      <p className="text-sm text-foreground">{course.name}</p>
+              {courses.length === 0 ? (
+                <div className="p-3 text-xs text-[#6b7a5f]">Nenhum curso cadastrado.</div>
+              ) : (
+                courses.map((course) => {
+                  const isEnabled = enrolledCourseIds.includes(course.id)
+                  return (
+                    <div key={course.id} className="p-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{course.code}</p>
+                        <p className="text-sm text-foreground">{course.name}</p>
+                      </div>
+                      <Switch
+                        checked={isEnabled}
+                        onCheckedChange={() => handleCourseToggle(course.id)}
+                        className="data-[state=checked]:bg-[#F4511E]"
+                      />
                     </div>
-                    <Switch
-                      checked={isEnabled}
-                      onCheckedChange={() => liberarCurso(studentInfo.id, course.id)}
-                      className="data-[state=checked]:bg-[#F4511E]"
-                    />
-                  </div>
-                )
-              })}
+                  )
+                })
+              )}
             </div>
           </div>
 
@@ -458,9 +696,18 @@ export default function StudentAdminPage() {
                             : "hover:bg-[#111111]"
                         }`}
                       >
-                        <p className="text-[10px] text-[#6b7a5f] uppercase tracking-wider">{attempt.examType}</p>
-                        <p className="text-sm text-foreground font-medium">{attempt.title}</p>
-                        <p className="text-[10px] text-[#6b7a5f]">{attempt.submittedAt}</p>
+                        {(() => {
+                          const context = buildAttemptContext(attempt.id)
+                          const examType = context?.moduleName === "Exame Final" ? "final" : "atividade"
+                          const title = context?.activityName || `Exame ${attempt.exam_id}`
+                          return (
+                            <>
+                              <p className="text-[10px] text-[#6b7a5f] uppercase tracking-wider">{examType}</p>
+                              <p className="text-sm text-foreground font-medium">{title}</p>
+                              <p className="text-[10px] text-[#6b7a5f]">{formatDateTime(attempt.submitted_at)}</p>
+                            </>
+                          )
+                        })()}
                       </button>
                     ))
                   )}
@@ -541,27 +788,19 @@ export default function StudentAdminPage() {
 }
 
 type AttemptReviewProps = {
-  attempt: {
-    id: number
-    answers: Record<number, string | number>
-    hasEssay: boolean
-    status: "pendente" | "corrigido"
-    scorePercent: number
-    scorePoints?: number
-    totalPoints?: number
-  }
+  attempt: ApiExamLog
   context: {
     courseName: string
     moduleName?: string
     activityName: string
-    questions: Question[]
+    questions: ApiQuestion[]
     totalPoints?: number
   } | null
   draft?: { grade?: string; feedback?: string }
   onDraftChange: (patch: { grade?: string; feedback?: string }) => void
   onSave: (totalPoints: number) => void
-  sumObjectivePoints: (questions: Question[], answers: Record<number, string | number>) => { correct: number; total: number; points: number }
-  sumQuestionPoints: (questions: Question[]) => number
+  sumObjectivePoints: (questions: ApiQuestion[], answers: Record<number, string | number>) => { correct: number; total: number; points: number }
+  sumQuestionPoints: (questions: ApiQuestion[]) => number
 }
 
 function AttemptReview({
@@ -577,12 +816,12 @@ function AttemptReview({
     return <p className="text-xs text-[#6b7a5f]">Dados da atividade indisponiveis.</p>
   }
 
-  const totalPoints = context.totalPoints ?? attempt.totalPoints ?? sumQuestionPoints(context.questions)
+  const totalPoints = context.totalPoints ?? attempt.total_points ?? sumQuestionPoints(context.questions)
   const objective = sumObjectivePoints(context.questions, attempt.answers)
   const currentPoints =
-    typeof attempt.scorePoints === "number"
-      ? attempt.scorePoints
-      : Number(((attempt.scorePercent / 100) * totalPoints).toFixed(1))
+    typeof attempt.score_points === "number"
+      ? attempt.score_points
+      : Number(((attempt.score_percent / 100) * totalPoints).toFixed(1))
 
   return (
     <div className="space-y-4">
@@ -591,7 +830,7 @@ function AttemptReview({
         <h3 className="text-sm text-foreground font-bold">{context.activityName}</h3>
         <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#6b7a5f]">
           <span>Acertos: {objective.correct}/{objective.total}</span>
-          {attempt.status === "pendente" ? (
+            {attempt.status === "pendente" ? (
             <span className="text-[#F4511E] font-mono">
               Parcial: {objective.points.toFixed(1)} / {totalPoints.toFixed(1)}
             </span>
@@ -614,8 +853,10 @@ function AttemptReview({
             {question.type === "multiple" ? (
               <div className="mt-3 space-y-2">
                 {(question.options || []).map((option, index) => {
-                  const selected = attempt.answers[question.id] === index
-                  const correct = question.correctIndex === index
+                  const rawAnswer = attempt.answers[question.id]
+                  const selectedIndex = typeof rawAnswer === "string" ? Number(rawAnswer) : rawAnswer
+                  const selected = selectedIndex === index
+                  const correct = question.correct_index === index
                   const stateClass = selected
                     ? correct
                       ? "border-green-500 text-green-400"
@@ -643,7 +884,7 @@ function AttemptReview({
               <div className="mt-3 border border-border p-3 text-xs text-[#6b7a5f]">
                 <p className="text-[10px] uppercase tracking-wider">Resposta dissertativa</p>
                 <p className="text-foreground mt-2">
-                  {String(attempt.answers[question.id] || "Sem resposta")}
+                  {String(attempt.answers[question.id] ?? "Sem resposta")}
                 </p>
                 {attempt.status === "pendente" && (
                   <span className="text-[#F4511E] text-[10px] uppercase tracking-wider">
@@ -656,7 +897,7 @@ function AttemptReview({
         ))}
       </div>
 
-      {attempt.hasEssay && attempt.status === "pendente" && (
+      {attempt.has_essay && attempt.status === "pendente" && (
         <div className="border border-border p-3 space-y-3">
           <div className="flex items-center gap-2 text-[#F4511E]">
             <Target className="h-4 w-4" />

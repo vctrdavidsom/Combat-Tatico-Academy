@@ -22,19 +22,88 @@ import {
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  useCombatContext,
-  type Question,
-  type UserDocument
-} from "@/contexts/CombatContext"
+import { useCombatContext, type UserDocument } from "@/contexts/CombatContext"
 
 type SectionKey = "cursos" | "dados" | "atividades" | "notas"
+
+type ApiQuestion = {
+  id: number
+  type: "multiple" | "essay"
+  prompt: string
+  options?: string[]
+  correct_index?: number | null
+  weight?: number | null
+}
+
+type ApiExam = {
+  id: number
+  title: string
+  type: "activity" | "final"
+  draw_count: number
+  attempt_limit: number
+  total_points?: number | null
+  cut_score?: number | null
+  duration_minutes?: number | null
+  questions: ApiQuestion[]
+}
+
+type ApiLesson = {
+  id: number
+  title: string
+  type: "video" | "material"
+  video_id?: string | null
+  duration?: string | null
+  material_pdf_url?: string | null
+  material_link_url?: string | null
+  order: number
+}
+
+type ApiModule = {
+  id: number
+  title: string
+  description?: string | null
+  order: number
+  lessons: ApiLesson[]
+  exams: ApiExam[]
+}
+
+type ApiCourse = {
+  id: number
+  code: string
+  name: string
+  description: string
+  duration: string
+  thumbnail_url?: string | null
+  is_active: boolean
+  modules: ApiModule[]
+  final_exam?: ApiExam | null
+}
+
+type ApiExamLog = {
+  id: number
+  user_id: number
+  exam_id: number
+  course_id?: number | null
+  module_id?: number | null
+  answers: Record<number, string | number>
+  score_percent: number
+  score_points?: number | null
+  total_points?: number | null
+  has_essay: boolean
+  status: "pendente" | "corrigido"
+  result: "apto" | "nao_apto"
+  submitted_at: string
+  attempt_number: number
+  max_attempts?: number | null
+  cut_score?: number | null
+  feedback?: string | null
+}
 
 type AttemptContext = {
   courseName: string
   moduleName?: string
   activityName: string
-  questions: Question[]
+  questions: ApiQuestion[]
 }
 
 type ObjectiveScore = {
@@ -47,14 +116,19 @@ type ObjectiveScore = {
 export default function DashboardPage() {
   const router = useRouter()
   const {
-    listaCursos,
-    tentativasExames,
     currentUser,
     logout,
     adicionarDocumentoAluno,
     alterarSenhaAluno,
     markAsRead
   } = useCombatContext()
+
+  const API_BASE_URL = "/api"
+  const ACCESS_TOKEN_KEY = "cta_access_token"
+  const [courses, setCourses] = useState<ApiCourse[]>([])
+  const [examLogs, setExamLogs] = useState<ApiExamLog[]>([])
+  const [isLoadingData, setIsLoadingData] = useState(false)
+  const [dataError, setDataError] = useState("")
 
   const searchParams = useSearchParams()
   const [activeSection, setActiveSection] = useState<SectionKey>("cursos")
@@ -64,15 +138,63 @@ export default function DashboardPage() {
   const [passwordMessage, setPasswordMessage] = useState("")
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const availableCourses = useMemo(() => {
-    if (!currentUser) return []
-    return listaCursos.filter((course) => currentUser.courses?.[course.id])
-  }, [listaCursos, currentUser])
+  const availableCourses = useMemo(() => courses, [courses])
 
-  const studentAttempts = useMemo(() => {
-    if (!currentUser) return []
-    return tentativasExames.filter((attempt) => attempt.userId === currentUser.id)
-  }, [tentativasExames, currentUser])
+  const studentAttempts = useMemo(() => examLogs, [examLogs])
+
+  useEffect(() => {
+    if (!currentUser) return
+
+    const loadData = async () => {
+      setDataError("")
+      setIsLoadingData(true)
+      try {
+        const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+        if (!token) {
+          setCourses([])
+          setExamLogs([])
+          setDataError("Token nao encontrado. Faca login novamente.")
+          return
+        }
+
+        const [coursesResponse, logsResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/courses/student/courses`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/exams/student/logs`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ])
+
+        const coursesRaw = await coursesResponse.text()
+        const logsRaw = await logsResponse.text()
+        const coursesData = coursesRaw ? JSON.parse(coursesRaw) : []
+        const logsData = logsRaw ? JSON.parse(logsRaw) : []
+
+        if (!coursesResponse.ok) {
+          setDataError(coursesRaw || "Erro ao carregar cursos.")
+          setCourses([])
+        } else {
+          setCourses(Array.isArray(coursesData) ? coursesData : [])
+        }
+
+        if (!logsResponse.ok) {
+          setDataError((prev) => prev || logsRaw || "Erro ao carregar atividades.")
+          setExamLogs([])
+        } else {
+          setExamLogs(Array.isArray(logsData) ? logsData : [])
+        }
+      } catch {
+        setDataError("Falha ao conectar com o servidor.")
+        setCourses([])
+        setExamLogs([])
+      } finally {
+        setIsLoadingData(false)
+      }
+    }
+
+    loadData()
+  }, [currentUser])
 
   useEffect(() => {
     const sectionParam = searchParams.get("section") as SectionKey | null
@@ -112,38 +234,49 @@ export default function DashboardPage() {
     return studentAttempts.find((attempt) => attempt.id === selectedAttemptId) || null
   }, [studentAttempts, selectedAttemptId])
 
-  const selectedAttemptContext = useMemo((): AttemptContext | null => {
-    if (!selectedAttempt) return null
-    const course = listaCursos.find((item) => item.id === selectedAttempt.courseId)
+  const resolveAttemptExam = (attempt: ApiExamLog) => {
+    const course = courses.find((item) => item.id === attempt.course_id)
     if (!course) return null
 
-    if (selectedAttempt.examType === "final") {
+    if (course.final_exam && course.final_exam.id === attempt.exam_id) {
       return {
-        courseName: course.name,
-        activityName: course.finalExam?.title || selectedAttempt.title,
-        questions: course.finalExam?.questions || []
+        course,
+        moduleName: "Exame Final",
+        exam: course.final_exam
       }
     }
 
     const module =
-      course.modules.find((item) => item.id === selectedAttempt.moduleId) ||
-      course.modules.find((item) => item.exams.some((exam) => exam.id === selectedAttempt.examId))
-    const item = module?.exams.find((exam) => exam.id === selectedAttempt.examId)
+      course.modules.find((item) => item.id === attempt.module_id) ||
+      course.modules.find((item) => item.exams.some((exam) => exam.id === attempt.exam_id))
+    const exam = module?.exams.find((item) => item.id === attempt.exam_id)
+    if (!exam) return null
+    return {
+        course,
+        moduleName: module?.title,
+        exam
+    }
+  }
+
+  const selectedAttemptContext = useMemo((): AttemptContext | null => {
+    if (!selectedAttempt) return null
+    const context = resolveAttemptExam(selectedAttempt)
+    if (!context) return null
 
     return {
-      courseName: course.name,
-      moduleName: module?.name,
-      activityName: item?.title || selectedAttempt.title,
-      questions: item?.questions || []
+      courseName: context.course.name,
+      moduleName: context.moduleName,
+      activityName: context.exam.title,
+      questions: context.exam.questions || []
     }
-  }, [selectedAttempt, listaCursos])
+  }, [selectedAttempt, courses])
 
-  const sumQuestionPoints = (questions: Question[]) =>
+  const sumQuestionPoints = (questions: ApiQuestion[]) =>
     Number(
       questions.reduce((sum, question) => sum + (question.weight ?? 1), 0).toFixed(2)
     )
 
-  const sumObjectivePoints = (questions: Question[], answers: Record<number, string | number>) => {
+  const sumObjectivePoints = (questions: ApiQuestion[], answers: Record<number, string | number>) => {
     let correct = 0
     let total = 0
     let points = 0
@@ -151,7 +284,7 @@ export default function DashboardPage() {
       if (question.type !== "multiple") return
       const weight = question.weight ?? 1
       total += 1
-      if (answers[question.id] === question.correctIndex) {
+      if (answers[question.id] === question.correct_index) {
         correct += 1
         points += weight
       }
@@ -162,7 +295,7 @@ export default function DashboardPage() {
   const objectiveScore = useMemo((): ObjectiveScore | null => {
     if (!selectedAttemptContext || !selectedAttempt) return null
     const totals = sumObjectivePoints(selectedAttemptContext.questions, selectedAttempt.answers)
-    const totalPoints = selectedAttempt.totalPoints ?? sumQuestionPoints(selectedAttemptContext.questions)
+    const totalPoints = selectedAttempt.total_points ?? sumQuestionPoints(selectedAttemptContext.questions)
     return {
       correct: totals.correct,
       total: totals.total,
@@ -173,12 +306,12 @@ export default function DashboardPage() {
 
   const finalPoints = useMemo(() => {
     if (!selectedAttempt) return null
-    const total = selectedAttempt.totalPoints
+    const total = selectedAttempt.total_points
     if (!total) return null
-    if (typeof selectedAttempt.scorePoints === "number") {
-      return Number(selectedAttempt.scorePoints.toFixed(1))
+    if (typeof selectedAttempt.score_points === "number") {
+      return Number(selectedAttempt.score_points.toFixed(1))
     }
-    return Number(((selectedAttempt.scorePercent / 100) * total).toFixed(1))
+    return Number(((selectedAttempt.score_percent / 100) * total).toFixed(1))
   }, [selectedAttempt])
 
   const gradebook = useMemo(() => {
@@ -190,12 +323,11 @@ export default function DashboardPage() {
         const activities = module.exams.filter((item) => item.type === "activity")
         const rows = activities.map((item) => {
           const questions = item.questions || []
-          const totalPoints = item.totalPoints ?? sumQuestionPoints(questions)
+          const totalPoints = item.total_points ?? sumQuestionPoints(questions)
           const attempts = studentAttempts.filter(
             (attempt) =>
-              attempt.courseId === course.id &&
-              attempt.examId === item.id &&
-              attempt.examType === "activity"
+              attempt.course_id === course.id &&
+              attempt.exam_id === item.id
           )
           const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
           let earnedPoints = 0
@@ -203,10 +335,10 @@ export default function DashboardPage() {
 
           if (lastAttempt) {
             if (lastAttempt.status === "corrigido") {
-              if (typeof lastAttempt.scorePoints === "number") {
-                earnedPoints = Number(lastAttempt.scorePoints.toFixed(1))
+              if (typeof lastAttempt.score_points === "number") {
+                earnedPoints = Number(lastAttempt.score_points.toFixed(1))
               } else {
-                earnedPoints = Number(((lastAttempt.scorePercent / 100) * totalPoints).toFixed(1))
+                earnedPoints = Number(((lastAttempt.score_percent / 100) * totalPoints).toFixed(1))
               }
               statusLabel = lastAttempt.result === "apto" ? "Apto" : "Reprovado"
             } else {
@@ -227,7 +359,7 @@ export default function DashboardPage() {
 
         return {
           id: module.id,
-          name: module.name,
+          name: module.title,
           rows
         }
       })
@@ -381,7 +513,7 @@ export default function DashboardPage() {
                       <div className="border-b border-border p-4">
                         <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{course.code}</p>
                         <h3 className="text-lg font-bold text-foreground">{course.name}</h3>
-                        <p className="text-xs text-[#6b7a5f] mt-2">{course.totalHours}</p>
+                        <p className="text-xs text-[#6b7a5f] mt-2">{course.duration}</p>
                       </div>
                       <div className="p-4 space-y-3">
                         <div className="flex items-center justify-between text-xs text-[#6b7a5f]">
@@ -547,9 +679,13 @@ export default function DashboardPage() {
                               : "hover:bg-[#111111]"
                           }`}
                         >
-                          <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{attempt.examType}</p>
-                          <p className="text-sm text-foreground font-medium">{attempt.title}</p>
-                          <p className="text-[10px] text-[#6b7a5f]">{attempt.submittedAt}</p>
+                          <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                            {resolveAttemptExam(attempt)?.exam.type || "atividade"}
+                          </p>
+                          <p className="text-sm text-foreground font-medium">
+                            {resolveAttemptExam(attempt)?.exam.title || "Atividade"}
+                          </p>
+                          <p className="text-[10px] text-[#6b7a5f]">{attempt.submitted_at}</p>
                         </button>
                       ))
                     )}
@@ -570,7 +706,7 @@ export default function DashboardPage() {
                               <Target className="h-4 w-4 text-[#F4511E]" />
                               Acertos: {objectiveScore.correct}/{objectiveScore.total}
                             </div>
-                            {selectedAttempt.hasEssay && selectedAttempt.status === "pendente" && (
+                            {selectedAttempt.has_essay && selectedAttempt.status === "pendente" && (
                               <span className="text-[#F4511E] font-mono">
                                 Parcial: {objectiveScore.partialPoints.toFixed(1)} / {objectiveScore.totalPoints.toFixed(1)}
                               </span>
@@ -597,7 +733,7 @@ export default function DashboardPage() {
                               <div className="mt-3 space-y-2">
                                 {question.options?.map((option, index) => {
                                   const selected = selectedAttempt.answers[question.id] === index
-                                  const correct = question.correctIndex === index
+                                  const correct = question.correct_index === index
                                   const stateClass = selected
                                     ? correct
                                       ? "border-green-500 text-green-400"
@@ -668,7 +804,7 @@ export default function DashboardPage() {
                         {entry.modules.map((module) => (
                           <div key={module.id} className="p-4">
                             <div className="flex items-center justify-between mb-3">
-                              <h3 className="text-sm font-bold text-foreground">{module.name}</h3>
+                              <h3 className="text-sm font-bold text-foreground">{module.title}</h3>
                               <span className="text-[10px] text-[#6b7a5f] uppercase tracking-wider font-mono">
                                 MOD-{String(module.id).padStart(2, "0")}
                               </span>

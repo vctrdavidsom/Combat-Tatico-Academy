@@ -1,8 +1,7 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react"
-import { courseMock } from "@/lib/course-data"
-import { initialLibraryItems, type LibraryItem } from "@/lib/admin-library"
+import { type LibraryItem } from "@/lib/admin-library"
 
 export type QuestionType = "multiple" | "essay"
 
@@ -223,76 +222,48 @@ type CombatContextValue = CombatState & {
 }
 
 const STORAGE_KEY = "cta_state_v1"
+const API_BASE_URL = "/api"
+const ACCESS_TOKEN_KEY = "cta_access_token"
 const ADMIN_EMAIL = "admin@combat.com"
 const ADMIN_PASSWORD = "admin123"
 
-const buildInitialCourses = (): Course[] => {
-  const base = courseMock as Course
-  const course2: Course = {
-    id: 2,
-    code: "SSP-002",
-    name: "Supervisor em Seguranca Privada",
-    description: "<p>Formacao completa para supervisao de equipes de seguranca.</p>",
-    thumbnail: "",
-    totalHours: "60h",
-    status: "ativo",
-    modules: [],
-    finalExam: null
-  }
-  const course3: Course = {
-    id: 3,
-    code: "ARM-003",
-    name: "Instrucao de Armeiro",
-    description: "<p>Curso tecnico para manutencao e manuseio seguro de armamentos.</p>",
-    thumbnail: "",
-    totalHours: "40h",
-    status: "ativo",
-    modules: [],
-    finalExam: null
-  }
-  return [base, course2, course3]
+type ApiUser = {
+  id: number
+  full_name: string
+  cpf: string
+  birth_date?: string | null
+  email: string
+  phone?: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  role: string
+  is_active: boolean
 }
 
-const buildInitialStudents = (): User[] => {
-  const today = "04/05/2026"
-  return [
-    {
-      id: 1,
-      name: "Joao Silva",
-      email: "joao.silva@email.com",
-      password: "aluno123",
-      role: "student",
-      enrolledAt: "15/01/2024",
-      status: "ativo",
-      phone: "(11) 99999-1234",
-      cpf: "123.456.789-00",
-      courses: { 1: true, 2: true, 3: false },
-      progress: { 1: [] },
-      notifications: [],
-      documents: []
-    },
-    {
-      id: 2,
-      name: "Maria Santos",
-      email: "maria.santos@email.com",
-      password: "aluno123",
-      role: "student",
-      enrolledAt: "22/02/2024",
-      status: "ativo",
-      phone: "(11) 99999-5678",
-      cpf: "987.654.321-00",
-      courses: { 1: true, 2: false, 3: false },
-      progress: { 1: [] },
-      notifications: [],
-      documents: []
-    }
-  ]
-}
+const mapApiRole = (role?: string): UserRole => (role === "ADMIN" ? "admin" : "student")
+
+const mapApiUserToLocal = (apiUser: ApiUser, existing?: User | null): User => ({
+  id: apiUser.id,
+  name: apiUser.full_name || existing?.name || "",
+  email: apiUser.email,
+  password: existing?.password || "",
+  role: mapApiRole(apiUser.role),
+  enrolledAt: existing?.enrolledAt || "",
+  status: apiUser.is_active ? "ativo" : "inativo",
+  phone: apiUser.phone || "",
+  cpf: apiUser.cpf || existing?.cpf,
+  courses: existing?.courses || {},
+  certificate: existing?.certificate,
+  progress: existing?.progress || {},
+  notifications: existing?.notifications || [],
+  documents: existing?.documents || []
+})
 
 const initialState: CombatState = {
-  listaAlunos: buildInitialStudents(),
-  listaCursos: buildInitialCourses(),
-  bibliotecaArquivos: initialLibraryItems,
+  listaAlunos: [],
+  listaCursos: [],
+  bibliotecaArquivos: [],
   tentativasExames: [],
   currentUserId: null,
   currentRole: null
@@ -389,6 +360,7 @@ const CombatContext = createContext<CombatContextValue | null>(null)
 
 export function CombatProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<CombatState>(initialState)
+  const [profileNonce, setProfileNonce] = useState(0)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -396,13 +368,81 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
     if (!stored) return
     try {
       const parsed = JSON.parse(stored) as CombatState
-      if (parsed?.listaAlunos && parsed?.listaCursos) {
-        setState(normalizeState(parsed))
-      }
+      if (!parsed) return
+      setState((prev) => ({
+        ...prev,
+        currentUserId: parsed.currentUserId ?? prev.currentUserId,
+        currentRole: parsed.currentRole ?? prev.currentRole
+      }))
     } catch {
       // ignore storage errors
     }
   }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleAuthChange = () => setProfileNonce((prev) => prev + 1)
+    window.addEventListener("cta-auth-changed", handleAuthChange)
+    return () => {
+      window.removeEventListener("cta-auth-changed", handleAuthChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+    if (!token) return
+
+    let active = true
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/users/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        })
+
+        const raw = await response.text()
+        let data: ApiUser | { detail?: unknown } | null = null
+        try {
+          data = raw ? (JSON.parse(raw) as ApiUser) : null
+        } catch {
+          data = null
+        }
+
+        if (!response.ok || !data || typeof data !== "object") {
+          localStorage.removeItem(ACCESS_TOKEN_KEY)
+          if (!active) return
+          setState((prev) => ({ ...prev, currentUserId: null, currentRole: null }))
+          return
+        }
+
+        const profile = data as ApiUser
+        if (!active) return
+        setState((prev) => {
+          const existing = prev.listaAlunos.find((student) => student.id === profile.id) || null
+          const nextUser = mapApiUserToLocal(profile, existing)
+          const nextStudents = existing
+            ? prev.listaAlunos.map((student) => (student.id === profile.id ? nextUser : student))
+            : [...prev.listaAlunos, nextUser]
+          return {
+            ...prev,
+            listaAlunos: nextStudents,
+            currentUserId: nextUser.id,
+            currentRole: nextUser.role
+          }
+        })
+      } catch {
+        // ignore fetch errors
+      }
+    }
+
+    loadProfile()
+    return () => {
+      active = false
+    }
+  }, [profileNonce])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -479,6 +519,9 @@ export function CombatProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(ACCESS_TOKEN_KEY)
+    }
     setState((prev) => ({ ...prev, currentUserId: null, currentRole: null }))
   }
 

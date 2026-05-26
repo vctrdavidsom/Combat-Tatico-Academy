@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
+from app.modules.lessons.schemas import LessonPublic
+from app.modules.exams.schemas import ExamPublic
 
 # --- SCHEMAS DE MÓDULO ---
 class ModuleCreate(BaseModel):
@@ -21,6 +23,11 @@ class ModulePublic(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ModuleDetailPublic(ModulePublic):
+    lessons: List[LessonPublic] = []
+    exams: List[ExamPublic] = []
 
 # --- SCHEMAS DE CURSO ---
 class CourseCreate(BaseModel):
@@ -51,4 +58,5 @@ class CoursePublic(BaseModel):
         from_attributes = True
 
 class CourseDetailPublic(CoursePublic):
-    modules: List[ModulePublic] = []
+    modules: List[ModuleDetailPublic] = []
+    final_exam: Optional[ExamPublic] = None

@@ -4,12 +4,18 @@ from sqlmodel import Session
 from app.core.database import init_db, engine
 from app.modules.users.models import User
 from app.modules.courses.models import Course, Module, Enrollment
+from app.modules.lessons.models import Lesson
+from app.modules.exams.models import Exam, Question, Alternative, ExamLog
+from app.modules.curriculum.models import LibraryItem
 
 from app.modules.users.utils import create_first_admin
 
 # Importação dos roteadores
 from app.modules.users.routes import router as users_router
 from app.modules.courses.routes import router as courses_router
+from app.modules.lessons.routes import router as lessons_router
+from app.modules.exams.routes import router as exams_router
+from app.modules.curriculum.routes import router as library_router
 
 
 @asynccontextmanager
@@ -39,6 +45,9 @@ app = FastAPI(
 # Acoplamento dos Módulos
 app.include_router(users_router)
 app.include_router(courses_router)
+app.include_router(lessons_router)
+app.include_router(exams_router)
+app.include_router(library_router)
 
 # Rota de teste simples
 @app.get("/", tags=["Health Check"])

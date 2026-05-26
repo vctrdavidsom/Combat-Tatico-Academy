@@ -20,7 +20,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 # 3. Criação do Token de Acesso (JWT)
-def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
+def create_access_token(
+    subject: Union[str, Any],
+    expires_delta: timedelta = None,
+    extra_claims: dict[str, Any] | None = None
+) -> str:
     """Gera um token assinado para o usuário."""
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -31,6 +35,8 @@ def create_access_token(subject: Union[str, Any], expires_delta: timedelta = Non
     
     # O 'sub' (subject) geralmente é o ID ou Email do usuário
     to_encode = {"exp": expire, "sub": str(subject)}
+    if extra_claims:
+        to_encode.update(extra_claims)
     
     # Assina o token com a nossa SECRET_KEY do .env
     encoded_jwt = jwt.encode(

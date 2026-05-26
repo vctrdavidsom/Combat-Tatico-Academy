@@ -1,12 +1,9 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   Play,
-  CheckCircle2,
-  Circle,
-  Lock,
   Download,
   MessageSquare,
   Send,
@@ -21,23 +18,163 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCombatContext } from "@/contexts/CombatContext"
 
+type ApiQuestion = {
+  id: number
+  type: "multiple" | "essay"
+  prompt: string
+  options?: string[]
+  correct_index?: number | null
+  weight?: number | null
+}
+
+type ApiExam = {
+  id: number
+  title: string
+  type: "activity" | "final"
+  draw_count: number
+  attempt_limit: number
+  total_points?: number | null
+  cut_score?: number | null
+  duration_minutes?: number | null
+  questions: ApiQuestion[]
+}
+
+type ApiLesson = {
+  id: number
+  title: string
+  type: "video" | "material"
+  video_id?: string | null
+  duration?: string | null
+  material_pdf_url?: string | null
+  material_link_url?: string | null
+  order: number
+}
+
+type ApiModule = {
+  id: number
+  title: string
+  description?: string | null
+  order: number
+  lessons: ApiLesson[]
+  exams: ApiExam[]
+}
+
+type ApiCourse = {
+  id: number
+  code: string
+  name: string
+  description: string
+  duration: string
+  thumbnail_url?: string | null
+  is_active: boolean
+  modules: ApiModule[]
+  final_exam?: ApiExam | null
+}
+
+type ApiExamLog = {
+  id: number
+  exam_id: number
+  course_id?: number | null
+}
+
+type LibraryItem = {
+  id: number
+  title: string
+  type: "pdf" | "link"
+  url: string
+  tags: string[]
+  updated_at: string
+}
+
+const API_BASE_URL = "/api"
+const ACCESS_TOKEN_KEY = "cta_access_token"
+
+const toEmbedUrl = (videoId?: string | null) =>
+  videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0` : ""
+
 export default function CoursePage() {
   const router = useRouter()
   const params = useParams()
   const searchParams = useSearchParams()
-  const { listaCursos, bibliotecaArquivos, currentUser, tentativasExames, marcarAulaConcluida } = useCombatContext()
+  const { currentUser } = useCombatContext()
   const courseId = Number(params.id)
-  const course = listaCursos.find((item) => item.id === courseId) || listaCursos[0]
-  const [expandedModule, setExpandedModule] = useState<number | null>(course?.modules?.[0]?.id ?? null)
+
+  const [course, setCourse] = useState<ApiCourse | null>(null)
+  const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([])
+  const [examLogs, setExamLogs] = useState<ApiExamLog[]>([])
+  const [expandedModule, setExpandedModule] = useState<number | null>(null)
   const [activeModuleIndex, setActiveModuleIndex] = useState(0)
   const [activeItemIndex, setActiveItemIndex] = useState(0)
   const [newComment, setNewComment] = useState("")
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState("")
 
-  const buildModuleEntries = (module: typeof course.modules[number]) => [
+  const buildModuleEntries = (module: ApiModule) => [
     ...module.lessons.map((lesson) => ({ kind: "lesson" as const, lesson })),
     ...module.exams.map((exam) => ({ kind: "exam" as const, exam }))
   ]
+
+  useEffect(() => {
+    if (!courseId) return
+
+    const loadCourse = async () => {
+      setLoadError("")
+      setIsLoading(true)
+      try {
+        const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+        if (!token) {
+          setLoadError("Token nao encontrado. Faca login novamente.")
+          setCourse(null)
+          return
+        }
+
+        const [courseResponse, libraryResponse, logsResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/courses/student/courses/${courseId}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/library/student/items`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/exams/student/logs`, {
+            headers: { Authorization: `Bearer ${token}` }
+          })
+        ])
+
+        const courseRaw = await courseResponse.text()
+        const libraryRaw = await libraryResponse.text()
+        const logsRaw = await logsResponse.text()
+
+        if (!courseResponse.ok) {
+          setLoadError(courseRaw || "Erro ao carregar curso.")
+          setCourse(null)
+        } else {
+          const courseData = courseRaw ? (JSON.parse(courseRaw) as ApiCourse) : null
+          setCourse(courseData)
+          if (courseData?.modules?.length) {
+            setExpandedModule((prev) => prev ?? courseData.modules[0].id)
+          }
+        }
+
+        if (libraryResponse.ok) {
+          const libData = libraryRaw ? JSON.parse(libraryRaw) : []
+          setLibraryItems(Array.isArray(libData) ? libData : [])
+        }
+
+        if (logsResponse.ok) {
+          const logsData = logsRaw ? JSON.parse(logsRaw) : []
+          setExamLogs(Array.isArray(logsData) ? logsData : [])
+        }
+      } catch {
+        setLoadError("Falha ao conectar com o servidor.")
+        setCourse(null)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadCourse()
+  }, [courseId])
 
   useEffect(() => {
     if (!course?.modules?.length) return
@@ -60,18 +197,7 @@ export default function CoursePage() {
     setIsPlaying(false)
   }, [searchParams, course])
 
-  if (!course) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header userName="Operador Delta" />
-        <main className="p-6">
-          <p className="text-[#6b7a5f]">Curso nao encontrado.</p>
-        </main>
-      </div>
-    )
-  }
-
-  const activeModule = course.modules[activeModuleIndex]
+  const activeModule = course?.modules?.[activeModuleIndex]
   const activeEntries = activeModule ? buildModuleEntries(activeModule) : []
   const activeEntry = activeEntries[activeItemIndex]
   const activeLesson = activeEntry?.kind === "lesson" ? activeEntry.lesson : null
@@ -83,34 +209,36 @@ export default function CoursePage() {
     setActiveModuleIndex(mi)
     setActiveItemIndex(ii)
     setIsPlaying(false)
-    const module = course.modules[mi]
-    const entries = module ? buildModuleEntries(module) : []
-    const entry = entries[ii]
-    if (currentUser && entry?.kind === "lesson") {
-      marcarAulaConcluida(currentUser.id, course.id, entry.lesson.id)
-    }
-  }
-
-  const startFinalExam = () => {
-    router.push(`/curso/${course.id}/missao?type=final`)
   }
 
   const startActivity = (moduleId: number, examId: number) => {
-    router.push(`/curso/${course.id}/missao?type=activity&moduleId=${moduleId}&examId=${examId}`)
+    router.push(`/curso/${courseId}/missao?type=activity&moduleId=${moduleId}&examId=${examId}`)
   }
 
-  const attemptsForLesson = (lessonId: number) =>
-    currentUser?.progress?.[course.id]?.includes(lessonId) || false
-
   const attemptsForExam = (examId: number) =>
-    currentUser
-      ? tentativasExames.some(
-          (attempt) =>
-            attempt.userId === currentUser.id &&
-            attempt.courseId === course.id &&
-            attempt.examId === examId
-        )
-      : false
+    examLogs.some((attempt) => attempt.exam_id === examId)
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header userName={currentUser?.name || "Operador"} />
+        <main className="p-6">
+          <p className="text-[#6b7a5f]">Carregando curso...</p>
+        </main>
+      </div>
+    )
+  }
+
+  if (!course) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header userName={currentUser?.name || "Operador"} />
+        <main className="p-6">
+          <p className="text-[#6b7a5f]">{loadError || "Curso nao encontrado."}</p>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -138,7 +266,7 @@ export default function CoursePage() {
                   <div className="flex flex-wrap items-center gap-2 text-xs text-white/70 sm:text-sm">
                     <span className="flex items-center gap-1">
                       <Clock className="h-4 w-4" />
-                      {activeLesson.duration || course.totalHours}
+                      {activeLesson.duration || course.duration}
                     </span>
                   </div>
                 </div>
@@ -149,7 +277,7 @@ export default function CoursePage() {
             ) : activeLesson?.type === "video" ? (
               <div className="aspect-video">
                 <iframe
-                  src={`https://www.youtube.com/embed/${activeLesson.videoId || ''}?autoplay=1&rel=0`}
+                  src={toEmbedUrl(activeLesson.video_id)}
                   title={activeLesson.title}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
@@ -162,9 +290,25 @@ export default function CoursePage() {
                   <div>
                     <h3 className="font-medium mb-2">Materiais (Biblioteca Global)</h3>
                     <ul className="space-y-2">
-                      {bibliotecaArquivos.map((lib) => (
+                      {activeLesson.material_pdf_url && (
+                        <li>
+                          <a href={activeLesson.material_pdf_url} target="_blank" rel="noreferrer" className="text-primary">
+                            {activeLesson.material_pdf_url}
+                          </a>
+                        </li>
+                      )}
+                      {activeLesson.material_link_url && (
+                        <li>
+                          <a href={activeLesson.material_link_url} target="_blank" rel="noreferrer" className="text-primary">
+                            {activeLesson.material_link_url}
+                          </a>
+                        </li>
+                      )}
+                      {libraryItems.map((lib) => (
                         <li key={lib.id}>
-                          <a href={lib.url} target="_blank" rel="noreferrer" className="text-primary">{lib.title}</a>
+                          <a href={lib.url} target="_blank" rel="noreferrer" className="text-primary">
+                            {lib.title}
+                          </a>
                         </li>
                       ))}
                     </ul>
@@ -174,8 +318,8 @@ export default function CoursePage() {
                 {activeExam && (
                   <div>
                     <p className="mb-2">Atividade: {activeExam.title}</p>
-                    <p className="mb-2">Tentativas permitidas: {activeExam.attemptLimit}</p>
-                    <Button onClick={() => startActivity(activeModule.id, activeExam.id)}>Iniciar Atividade</Button>
+                    <p className="mb-2">Tentativas permitidas: {activeExam.attempt_limit}</p>
+                    <Button onClick={() => startActivity(activeModule?.id || 0, activeExam.id)}>Iniciar Atividade</Button>
                     {attemptsForExam(activeExam.id) && (
                       <p className="text-xs text-[#6b7a5f] mt-2">Atividade registrada como enviada.</p>
                     )}
@@ -190,7 +334,7 @@ export default function CoursePage() {
           <div className="flex flex-wrap gap-4 mb-8">
             <Button variant="outline" className="border-[#6b7a5f] text-[#6b7a5f] hover:bg-[#6b7a5f] hover:text-white rounded-none w-full justify-start whitespace-normal text-left sm:w-auto sm:justify-center sm:text-center">
               <FileText className="h-4 w-4 mr-2" />
-              Download de Manual Tático
+              Download de Manual Tatico
               <Download className="h-4 w-4 ml-2" />
             </Button>
             <Button variant="outline" className="border-border text-[#6b7a5f] hover:bg-secondary rounded-none w-full justify-start whitespace-normal text-left sm:w-auto sm:justify-center sm:text-center">
@@ -203,7 +347,7 @@ export default function CoursePage() {
           <div className="border border-border bg-card">
             <div className="flex items-center gap-3 p-4 border-b border-border">
               <MessageSquare className="h-5 w-5 text-[#F4511E]" />
-              <h3 className="font-bold text-foreground uppercase tracking-wider">Debate Técnico</h3>
+              <h3 className="font-bold text-foreground uppercase tracking-wider">Debate Tecnico</h3>
             </div>
             <div className="p-4 border-b border-border">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -211,7 +355,7 @@ export default function CoursePage() {
                   <User className="h-5 w-5 text-[#6b7a5f]" />
                 </div>
                 <div className="flex-1 flex flex-col gap-2 sm:flex-row">
-                  <Input placeholder="Compartilhe sua análise técnica..." value={newComment} onChange={(e) => setNewComment(e.target.value)} className="flex-1 border-border bg-secondary rounded-none text-sm" />
+                  <Input placeholder="Compartilhe sua analise tecnica..." value={newComment} onChange={(e) => setNewComment(e.target.value)} className="flex-1 border-border bg-secondary rounded-none text-sm" />
                   <Button className="bg-[#F4511E] hover:bg-[#F4511E]/90 rounded-none px-4 w-full sm:w-auto"><Send className="h-4 w-4" /></Button>
                 </div>
               </div>
@@ -222,7 +366,7 @@ export default function CoursePage() {
         {/* Sidebar - Modules */}
         <aside className="w-full lg:w-96 border-t border-border bg-card lg:border-t-0 lg:border-l">
           <div className="p-4 border-b border-border">
-            <h3 className="font-bold text-foreground uppercase tracking-wider">Módulos do Curso</h3>
+            <h3 className="font-bold text-foreground uppercase tracking-wider">Modulos do Curso</h3>
             <div className="flex items-center gap-2 mt-2">
               <div className="flex-1 h-1 bg-secondary"><div className="h-full w-[45%] bg-[#F4511E]" /></div>
               <span className="text-xs text-[#6b7a5f]">45%</span>
@@ -234,7 +378,7 @@ export default function CoursePage() {
               <div key={module.id}>
                 <button onClick={() => setExpandedModule(expandedModule === module.id ? null : module.id)} className="flex items-center justify-between w-full p-3 text-left hover:bg-secondary/50 transition-colors sm:p-4">
                   <div>
-                    <p className="font-medium text-foreground text-sm">{module.name}</p>
+                    <p className="font-medium text-foreground text-sm">{module.title}</p>
                     <p className="text-xs text-[#6b7a5f] mt-1">
                       {module.lessons.length + module.exams.length} itens
                     </p>
@@ -258,7 +402,7 @@ export default function CoursePage() {
                         >
                           <div className="flex-1 min-w-0">
                             <p className={`text-sm truncate ${isActive ? "text-[#F4511E] font-medium" : "text-foreground"}`}>{title}</p>
-                            <p className="text-xs text-[#6b7a5f] mt-0.5">{meta}</p>
+                            <p className="text-xs text-[#6b7a5f] mt-1">{meta}</p>
                           </div>
                         </button>
                       )
@@ -267,11 +411,6 @@ export default function CoursePage() {
                 )}
               </div>
             ))}
-
-            <div className="p-4">
-              <Button variant="default" onClick={startFinalExam}>Iniciar Exame Final</Button>
-              <p className="text-sm text-muted-foreground mt-2">Tentativas permitidas: {course.finalExam?.attemptLimit ?? 0}</p>
-            </div>
           </div>
         </aside>
       </div>

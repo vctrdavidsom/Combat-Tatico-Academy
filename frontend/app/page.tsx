@@ -66,7 +66,44 @@ export default function LoginPage() {
       }
 
       localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token)
-      router.push("/admin")
+
+      const profileResponse = await fetch(`${API_BASE_URL}/users/me`, {
+        headers: {
+          Authorization: `Bearer ${data.access_token}`
+        }
+      })
+
+      const profileRaw = await profileResponse.text()
+      let profile: { role?: string } | null = null
+      try {
+        profile = profileRaw ? JSON.parse(profileRaw) : null
+      } catch {
+        profile = null
+      }
+
+      if (!profileResponse.ok) {
+        localStorage.removeItem(ACCESS_TOKEN_KEY)
+        const detail = (profile as { detail?: unknown } | null)?.detail
+        const message = typeof detail === "string"
+          ? detail
+          : detail
+            ? JSON.stringify(detail)
+            : profileRaw || "Falha ao carregar perfil."
+        setError(message)
+        setIsLoading(false)
+        return
+      }
+
+      const role = profile?.role
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("cta-auth-changed"))
+      }
+
+      if (role === "ADMIN") {
+        router.push("/admin")
+      } else {
+        router.push("/dashboard")
+      }
     } catch {
       setError("Falha ao conectar com o servidor.")
     } finally {
@@ -185,16 +222,6 @@ export default function LoginPage() {
       </div>
 
       <div className="relative w-full max-w-md">
-        {/* Warning Banner */}
-        <div className="mb-6 border border-[#F4511E] bg-[#F4511E]/10 p-3">
-          <div className="flex items-center gap-2 text-[#F4511E]">
-            <AlertTriangle className="h-4 w-4" />
-            <span className="text-xs uppercase tracking-wider">
-              {screen === "login" ? "Área de Acesso Restrito" : "Recuperação de Acesso"}
-            </span>
-          </div>
-        </div>
-
         {/* Login Card */}
         <div className="border border-border bg-card">
           {/* Header */}
@@ -631,18 +658,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Demo Credentials - Only show on login screen */}
-        {screen === "login" && (
-          <div className="mt-4 border border-border bg-card p-4">
-            <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-              Credenciais de Demonstração:
-            </p>
-            <div className="space-y-1 text-xs text-foreground">
-              <p><span className="text-[#6b7a5f]">Aluno:</span> qualquer email + senha</p>
-              <p><span className="text-[#6b7a5f]">Admin:</span> admin@combat.com / admin123</p>
-            </div>
-          </div>
-        )}
       </div>
     </main>
   )

@@ -1,15 +1,14 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { 
-  BookOpen, 
+import {
+  BookOpen,
   Search,
   ChevronRight,
   Plus,
   X,
   Image as ImageIcon,
-  Link as LinkIcon,
   Clock,
   Users,
   Layers
@@ -17,70 +16,158 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/admin/rich-text-editor"
-import { useCombatContext } from "@/contexts/CombatContext"
 
-const stripHtml = (value: string) => {
-  return value.replace(/<[^>]*>/g, "").trim()
+type AdminCourse = {
+  id: number
+  code: string
+  name: string
+  description: string
+  duration: string
+  thumbnail_url?: string | null
+  is_active: boolean
+}
+
+const API_BASE_URL = "/api"
+const ACCESS_TOKEN_KEY = "cta_access_token"
+
+const stripHtml = (value: string) => value.replace(/<[^>]*>/g, "").trim()
+
+const readJsonResponse = async <T,>(response: Response) => {
+  const raw = await response.text()
+  if (!raw) {
+    return { data: null as T | null, raw: "" }
+  }
+  try {
+    return { data: JSON.parse(raw) as T, raw }
+  } catch {
+    return { data: null as T | null, raw }
+  }
+}
+
+const resolveApiError = (raw: string, data: unknown, fallback: string) => {
+  const detail = (data as { detail?: unknown } | null)?.detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => (item as { msg?: string })?.msg || JSON.stringify(item))
+      .join(" | ")
+  }
+  if (typeof detail === "string") {
+    return detail
+  }
+  if (detail) {
+    return JSON.stringify(detail)
+  }
+  return raw || fallback
 }
 
 export default function AdminCoursesPage() {
   const router = useRouter()
-  const { listaCursos, listaAlunos, tentativasExames, criarCurso } = useCombatContext()
+  const [courses, setCourses] = useState<AdminCourse[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [showAddModal, setShowAddModal] = useState(false)
+  const [isLoadingCourses, setIsLoadingCourses] = useState(false)
+  const [coursesError, setCoursesError] = useState("")
+  const [isCreating, setIsCreating] = useState(false)
+  const [createError, setCreateError] = useState("")
   const [newCourse, setNewCourse] = useState({
     name: "",
     code: "",
     description: "",
-    thumbnail: "",
-    totalHours: ""
+    thumbnailUrl: "",
+    duration: ""
   })
+
+  const loadCourses = useCallback(async () => {
+    setCoursesError("")
+    setIsLoadingCourses(true)
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setCourses([])
+        setCoursesError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/courses/admin/courses`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const { data, raw } = await readJsonResponse<AdminCourse[] | { detail?: unknown }>(response)
+      if (!response.ok) {
+        setCoursesError(resolveApiError(raw, data, "Erro ao carregar cursos."))
+        setCourses([])
+        return
+      }
+
+      setCourses(Array.isArray(data) ? data : [])
+    } catch {
+      setCoursesError("Falha ao conectar com o servidor.")
+      setCourses([])
+    } finally {
+      setIsLoadingCourses(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCourses()
+  }, [loadCourses])
 
   const filteredCourses = useMemo(() => {
     const term = searchQuery.toLowerCase()
-    return listaCursos.filter(
+    return courses.filter(
       (course) =>
         course.name.toLowerCase().includes(term) ||
         course.code.toLowerCase().includes(term)
     )
-  }, [listaCursos, searchQuery])
+  }, [courses, searchQuery])
 
-  const getCourseStats = (courseId: number) => {
-    const studentsCount = listaAlunos.filter((student) => student.courses[courseId]).length
-    const completedCount = listaAlunos.filter(
-      (student) =>
-        student.courses[courseId] &&
-        (student.status === "apto" || student.status === "certificado")
-    ).length
-    const attempts = tentativasExames.filter(
-      (attempt) => attempt.courseId === courseId && attempt.status === "corrigido"
-    )
-    const averageScore = attempts.length
-      ? Math.round(attempts.reduce((sum, attempt) => sum + attempt.scorePercent, 0) / attempts.length)
-      : 0
-    const completionRate = studentsCount
-      ? Math.round((completedCount / studentsCount) * 100)
-      : 0
-    return { studentsCount, completionRate, averageScore }
-  }
+  const handleAddCourse = async () => {
+    if (!newCourse.name || !newCourse.code || isCreating) return
+    setCreateError("")
+    setIsCreating(true)
 
-  const handleAddCourse = () => {
-    if (newCourse.name && newCourse.code) {
-      criarCurso({
-        code: newCourse.code,
-        name: newCourse.name,
-        description: newCourse.description,
-        thumbnail: newCourse.thumbnail,
-        totalHours: newCourse.totalHours
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      }
+      if (token) {
+        headers.Authorization = `Bearer ${token}`
+      }
+
+      const response = await fetch(`${API_BASE_URL}/courses/admin/courses`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          code: newCourse.code.toUpperCase(),
+          name: newCourse.name,
+          description: newCourse.description || "",
+          duration: newCourse.duration || "0h",
+          thumbnail_url: newCourse.thumbnailUrl || null
+        })
       })
+
+      const { data, raw } = await readJsonResponse<{ detail?: unknown }>(response)
+      if (!response.ok) {
+        setCreateError(resolveApiError(raw, data, "Erro ao criar curso."))
+        return
+      }
+
+      await loadCourses()
       setNewCourse({
         name: "",
         code: "",
         description: "",
-        thumbnail: "",
-        totalHours: ""
+        thumbnailUrl: "",
+        duration: ""
       })
       setShowAddModal(false)
+    } catch {
+      setCreateError("Falha ao conectar com o servidor.")
+    } finally {
+      setIsCreating(false)
     }
   }
 
@@ -88,137 +175,140 @@ export default function AdminCoursesPage() {
 
   return (
     <div>
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Gestão de Cursos</h1>
-            <p className="text-sm text-[#6b7a5f]">Adicione e gerencie cursos, módulos e aulas</p>
-          </div>
-          <Button 
-            onClick={() => setShowAddModal(true)}
-            className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none w-full sm:w-auto"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Curso
-          </Button>
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Gestao de Cursos</h1>
+          <p className="text-sm text-[#6b7a5f]">Adicione e gerencie cursos, modulos e aulas</p>
         </div>
+        <Button
+          onClick={() => setShowAddModal(true)}
+          className="bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none w-full sm:w-auto"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Novo Curso
+        </Button>
+      </div>
 
-        {/* Search */}
-        <div className="relative mb-6">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7a5f]" />
-          <Input
-            placeholder="Buscar por nome ou código do curso..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 border-border bg-secondary rounded-none w-full sm:max-w-md"
-          />
+      {/* Search */}
+      <div className="relative mb-6">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7a5f]" />
+        <Input
+          placeholder="Buscar por nome ou codigo do curso..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-10 border-border bg-secondary rounded-none w-full sm:max-w-md"
+        />
+      </div>
+
+      {coursesError && (
+        <div className="border border-border bg-card p-4 text-sm text-red-500 mb-6">
+          {coursesError}
         </div>
+      )}
 
-        {/* Courses Grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredCourses.map((course) => (
-            (() => {
-              const stats = getCourseStats(course.id)
-              return (
-            <div 
-              key={course.id} 
-              onClick={() => router.push(`/admin/cursos/${course.id}`)}
-              className="border border-border bg-card hover:border-[#F4511E]/50 transition-colors cursor-pointer group"
-            >
-              {/* Thumbnail */}
-              <div className="aspect-video bg-secondary border-b border-border flex items-center justify-center">
-                {course.thumbnail ? (
-                  <img 
-                    src={course.thumbnail} 
-                    alt={course.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="text-center">
-                    <BookOpen className="h-12 w-12 text-[#6b7a5f] mx-auto mb-2" />
-                    <span className="text-xs text-[#6b7a5f]">Sem thumbnail</span>
-                  </div>
-                )}
-              </div>
+      {isLoadingCourses && (
+        <div className="border border-border bg-card p-8 text-center">
+          <BookOpen className="h-12 w-12 text-[#6b7a5f] mx-auto mb-3" />
+          <p className="text-[#6b7a5f]">Carregando cursos...</p>
+        </div>
+      )}
 
-              {/* Course Info */}
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div>
-                    <span className="text-xs text-[#6b7a5f] uppercase tracking-wider">
-                      {course.code}
+      {!isLoadingCourses && (
+        <>
+          {/* Courses Grid */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredCourses.map((course) => (
+              <div
+                key={course.id}
+                onClick={() => router.push(`/admin/cursos/${course.id}`)}
+                className="border border-border bg-card hover:border-[#F4511E]/50 transition-colors cursor-pointer group"
+              >
+                {/* Thumbnail */}
+                <div className="aspect-video bg-secondary border-b border-border flex items-center justify-center">
+                  {course.thumbnail_url ? (
+                    <img
+                      src={course.thumbnail_url}
+                      alt={course.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-center">
+                      <BookOpen className="h-12 w-12 text-[#6b7a5f] mx-auto mb-2" />
+                      <span className="text-xs text-[#6b7a5f]">Sem thumbnail</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Course Info */}
+                <div className="p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                      <span className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                        {course.code}
+                      </span>
+                      <h3 className="font-bold text-foreground group-hover:text-[#F4511E] transition-colors">
+                        {course.name}
+                      </h3>
+                    </div>
+                    <span
+                      className={`text-xs px-2 py-1 uppercase tracking-wider ${
+                        course.is_active
+                          ? "text-green-500 bg-green-500/10"
+                          : "text-yellow-500 bg-yellow-500/10"
+                      }`}
+                    >
+                      {course.is_active ? "ativo" : "inativo"}
                     </span>
-                    <h3 className="font-bold text-foreground group-hover:text-[#F4511E] transition-colors">
-                      {course.name}
-                    </h3>
                   </div>
-                  <span className={`text-xs px-2 py-1 uppercase tracking-wider ${
-                    course.status === "ativo" 
-                      ? "text-green-500 bg-green-500/10" 
-                      : "text-yellow-500 bg-yellow-500/10"
-                  }`}>
-                    {course.status}
-                  </span>
-                </div>
 
-                <p className="text-sm text-[#6b7a5f] mb-4 line-clamp-2">
-                  {stripHtml(course.description)}
-                </p>
+                  <p className="text-sm text-[#6b7a5f] mb-4 line-clamp-2">
+                    {stripHtml(course.description)}
+                  </p>
 
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-2 pt-3 border-t border-border">
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
-                      <Clock className="h-3 w-3" />
-                      <span className="text-xs">{course.totalHours}</span>
+                  {/* Stats */}
+                  <div className="grid grid-cols-3 gap-2 pt-3 border-t border-border">
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
+                        <Clock className="h-3 w-3" />
+                        <span className="text-xs">{course.duration}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
-                      <Layers className="h-3 w-3" />
-                      <span className="text-xs">{course.modules.length} módulos</span>
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
+                        <Layers className="h-3 w-3" />
+                        <span className="text-xs">-- modulos</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
-                      <Users className="h-3 w-3" />
-                      <span className="text-xs">{stats.studentsCount} alunos</span>
+                    <div className="text-center">
+                      <div className="flex items-center justify-center gap-1 text-[#6b7a5f]">
+                        <Users className="h-3 w-3" />
+                        <span className="text-xs">-- alunos</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2 pt-3 mt-3 border-t border-border">
-                  <div className="text-center">
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Conclusao</p>
-                    <p className="text-sm text-foreground font-bold">{stats.completionRate}%</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Nota media</p>
-                    <p className="text-sm text-foreground font-bold">{stats.averageScore}%</p>
+
+                {/* Action */}
+                <div className="px-4 pb-4">
+                  <div className="flex items-center justify-end gap-2 text-[#6b7a5f] group-hover:text-[#F4511E] transition-colors">
+                    <span className="text-xs uppercase tracking-wider">Gerenciar</span>
+                    <ChevronRight className="h-4 w-4" />
                   </div>
                 </div>
               </div>
-
-              {/* Action */}
-              <div className="px-4 pb-4">
-                <div className="flex items-center justify-end gap-2 text-[#6b7a5f] group-hover:text-[#F4511E] transition-colors">
-                  <span className="text-xs uppercase tracking-wider">
-                    Gerenciar
-                  </span>
-                  <ChevronRight className="h-4 w-4" />
-                </div>
-              </div>
-            </div>
-              )
-            })()
-          ))}
-        </div>
-
-        {filteredCourses.length === 0 && (
-          <div className="border border-border bg-card p-8 text-center">
-            <BookOpen className="h-12 w-12 text-[#6b7a5f] mx-auto mb-3" />
-            <p className="text-[#6b7a5f]">Nenhum curso encontrado.</p>
+            ))}
           </div>
-        )}
+
+          {filteredCourses.length === 0 && (
+            <div className="border border-border bg-card p-8 text-center">
+              <BookOpen className="h-12 w-12 text-[#6b7a5f] mx-auto mb-3" />
+              <p className="text-[#6b7a5f]">Nenhum curso encontrado.</p>
+            </div>
+          )}
+        </>
+      )}
+
       {/* Add Course Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -236,7 +326,7 @@ export default function AdminCoursesPage() {
                   </p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setShowAddModal(false)}
                 className="text-[#6b7a5f] hover:text-foreground transition-colors"
               >
@@ -252,7 +342,7 @@ export default function AdminCoursesPage() {
                     Nome do Curso *
                   </label>
                   <Input
-                    placeholder="Ex: Táticas de Combate Avançado"
+                    placeholder="Ex: Taticas de Combate Avancado"
                     value={newCourse.name}
                     onChange={(e) => setNewCourse({ ...newCourse, name: e.target.value })}
                     className="border-border bg-secondary rounded-none"
@@ -260,7 +350,7 @@ export default function AdminCoursesPage() {
                 </div>
                 <div>
                   <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
-                    Código *
+                    Codigo *
                   </label>
                   <Input
                     placeholder="Ex: TCA-001"
@@ -286,45 +376,49 @@ export default function AdminCoursesPage() {
                   </label>
                   <Input
                     placeholder="https://..."
-                    value={newCourse.thumbnail}
-                    onChange={(e) => setNewCourse({ ...newCourse, thumbnail: e.target.value })}
+                    value={newCourse.thumbnailUrl}
+                    onChange={(e) => setNewCourse({ ...newCourse, thumbnailUrl: e.target.value })}
                     className="border-border bg-secondary rounded-none"
                   />
                 </div>
                 <div>
                   <label className="block text-xs text-[#6b7a5f] uppercase tracking-wider mb-2">
                     <Clock className="h-3 w-3 inline mr-1" />
-                    Carga Horária
+                    Carga Horaria
                   </label>
                   <Input
                     placeholder="Ex: 40h"
-                    value={newCourse.totalHours}
-                    onChange={(e) => setNewCourse({ ...newCourse, totalHours: e.target.value })}
+                    value={newCourse.duration}
+                    onChange={(e) => setNewCourse({ ...newCourse, duration: e.target.value })}
                     className="border-border bg-secondary rounded-none"
                   />
                 </div>
               </div>
 
+              {createError && (
+                <p className="text-xs text-red-500">{createError}</p>
+              )}
+
               <p className="text-xs text-[#6b7a5f]">
-                Após criar o curso, você poderá adicionar módulos e aulas na página de gerenciamento.
+                Após criar o curso, voce podera adicionar modulos e aulas na pagina de gerenciamento.
               </p>
             </div>
 
             {/* Modal Footer */}
             <div className="flex flex-col-reverse gap-3 p-4 border-t border-border sm:flex-row">
-              <Button 
+              <Button
                 variant="outline"
                 onClick={() => setShowAddModal(false)}
                 className="flex-1 border-border rounded-none"
               >
                 Cancelar
               </Button>
-              <Button 
+              <Button
                 onClick={handleAddCourse}
-                disabled={!isFormValid}
+                disabled={!isFormValid || isCreating}
                 className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
               >
-                Criar Curso
+                {isCreating ? "Criando..." : "Criar Curso"}
               </Button>
             </div>
           </div>

@@ -49,7 +49,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), session: Session = D
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    access_token = create_access_token(subject=user.email)
+    access_token = create_access_token(
+        subject=user.email,
+        extra_claims={"role": user.role.value}
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me", response_model=UserPublic)
