@@ -21,8 +21,7 @@ import {
   Lock,
   ClipboardCheck,
   Megaphone,
-  FolderOpen,
-  BarChart3
+  FolderOpen
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -274,16 +273,6 @@ export default function AdminPage() {
                 <p className="text-sm text-foreground">Broadcast Operacional</p>
               </div>
               <Megaphone className="h-5 w-5 text-[#F4511E]" />
-            </button>
-            <button
-              onClick={() => router.push("/admin/relatorios")}
-              className="flex items-center justify-between border border-border bg-secondary/30 p-4 hover:border-[#F4511E] transition-colors"
-            >
-              <div>
-                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Analise</p>
-                <p className="text-sm text-foreground">Relatorios</p>
-              </div>
-              <BarChart3 className="h-5 w-5 text-[#F4511E]" />
             </button>
           </div>
         </div>

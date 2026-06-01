@@ -1,8 +1,9 @@
 "use client"
 
+import Image from "next/image"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Shield, Lock, User, AlertTriangle, Eye, EyeOff, Mail, ArrowLeft, KeyRound, CheckCircle } from "lucide-react"
+import { Lock, User, AlertTriangle, Eye, EyeOff, Mail, ArrowLeft, KeyRound, CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -227,8 +228,15 @@ export default function LoginPage() {
           {/* Header */}
           <div className="border-b border-border p-4 sm:p-6">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
-                <Shield className="h-6 w-6 text-[#F4511E]" />
+              <div className="relative flex h-12 w-12 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
+                <Image
+                  src="/logo.png"
+                  alt="Combat Tático Academy"
+                  fill
+                  sizes="48px"
+                  className="object-contain p-1"
+                  priority
+                />
               </div>
               <div>
                 <h1 className="text-lg font-bold text-foreground tracking-wide">

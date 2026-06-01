@@ -146,6 +146,7 @@ export default function DashboardPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [passwordMessage, setPasswordMessage] = useState("")
   const [downloadingCertificateId, setDownloadingCertificateId] = useState<number | null>(null)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const availableCourses = useMemo(() => courses, [courses])
@@ -458,6 +459,8 @@ export default function DashboardPage() {
     router.push("/")
   }
 
+  const toggleSidebar = () => setIsSidebarOpen((prev) => !prev)
+
   const handlePasswordChange = () => {
     setPasswordMessage("")
     if (!currentUser) return
@@ -554,7 +557,17 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <aside className="w-full border-b border-[#F4511E] bg-black md:fixed md:inset-y-0 md:left-0 md:w-64 md:border-b-0 md:border-r">
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 border-r border-[#F4511E] bg-black flex flex-col transform transition-transform duration-200 ease-linear ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
         <div className="p-4 border-b border-[#F4511E]/30">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
@@ -578,7 +591,10 @@ export default function DashboardPage() {
           ).map((item) => (
             <button
               key={item.key}
-              onClick={() => setActiveSection(item.key)}
+              onClick={() => {
+                setActiveSection(item.key)
+                setIsSidebarOpen(false)
+              }}
               className={`flex w-full items-center gap-3 border px-3 py-2 text-left text-xs uppercase tracking-wider transition-colors ${
                 activeSection === item.key
                   ? "border-[#F4511E] bg-[#F4511E]/10 text-[#F4511E]"
@@ -602,8 +618,17 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      <div className="md:pl-64">
-        <Header userName={currentUser.name} />
+      <div
+        className={`transition-[padding] duration-200 ease-linear ${
+          isSidebarOpen ? "md:pl-64" : "md:pl-0"
+        }`}
+      >
+        <Header
+          userName={currentUser.name}
+          showSidebarToggle
+          onToggleSidebar={toggleSidebar}
+          sidebarOpen={isSidebarOpen}
+        />
 
         <main className="p-4 md:p-6 space-y-6">
           {pendingCriticalNotice && currentUser && (

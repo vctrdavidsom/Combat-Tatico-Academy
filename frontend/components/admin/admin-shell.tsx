@@ -1,13 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import {
   BookOpen,
   ClipboardCheck,
   FolderOpen,
+  LogOut,
   Shield,
+  User,
   Users,
   X
 } from "lucide-react"
@@ -25,6 +27,7 @@ const navItems = [
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const router = useRouter()
   const viewParam = searchParams.get("view")
   const [isRootAdmin, setIsRootAdmin] = useState(false)
   const [rootCheckError, setRootCheckError] = useState("")
@@ -36,7 +39,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [adminConfirmPassword, setAdminConfirmPassword] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   const [showCreateAdminModal, setShowCreateAdminModal] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const ACCESS_TOKEN_KEY = "cta_access_token"
+  const adminDisplayName = "Comandante Admin"
 
   useEffect(() => {
     const checkRoot = async () => {
@@ -79,6 +84,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const isPasswordValid = adminPassword.length >= 6
   const isPasswordMatch = adminPassword === adminConfirmPassword
   const canCreateAdmin = adminName.trim() && isAdminEmail && isPasswordValid && isPasswordMatch && !isCreating
+  const toggleSidebar = () => setIsSidebarOpen((prev) => !prev)
+  const handleLogout = () => {
+    router.push("/")
+  }
 
   const handleCreateAdmin = async () => {
     if (!canCreateAdmin) return
@@ -134,7 +143,17 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <aside className="fixed inset-y-0 left-0 w-64 border-r border-[#F4511E] bg-black flex flex-col">
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 border-r border-[#F4511E] bg-black flex flex-col transform transition-transform duration-200 ease-linear ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
         <div className="p-4 border-b border-[#F4511E]/30">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center border border-[#F4511E] bg-[#F4511E]/10">
@@ -158,6 +177,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => setIsSidebarOpen(false)}
                 className={`flex items-center gap-3 border px-3 py-2 text-xs uppercase tracking-wider transition-colors ${
                   active
                     ? "border-[#F4511E] bg-[#F4511E]/10 text-[#F4511E]"
@@ -171,28 +191,62 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           })}
         </nav>
 
-        {isRootAdmin && (
+        <div className="mt-auto">
           <div className="p-4 border-t border-[#F4511E]/30">
-            <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-3">
-              Criar perfil de admin
-            </p>
-            <div className="space-y-2">
-              <Button
-                onClick={() => setShowCreateAdminModal(true)}
-                className="w-full bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none text-xs"
-              >
-                Criar admin
-              </Button>
-              {rootCheckError && !isRootAdmin && (
-                <p className="text-[10px] text-red-500">{rootCheckError}</p>
-              )}
+            <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-3">Perfil</p>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center bg-[#6b7a5f]/20 border border-[#6b7a5f]">
+                <User className="h-5 w-5 text-[#6b7a5f]" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">{adminDisplayName}</p>
+                <p className="text-xs text-[#6b7a5f] uppercase">Administrador</p>
+              </div>
             </div>
           </div>
-        )}
+          {isRootAdmin && (
+            <div className="p-4 border-t border-[#F4511E]/30">
+              <p className="text-xs text-[#6b7a5f] uppercase tracking-wider mb-3">
+                Criar perfil de admin
+              </p>
+              <div className="space-y-2">
+                <Button
+                  onClick={() => setShowCreateAdminModal(true)}
+                  className="w-full bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none text-xs"
+                >
+                  Criar admin
+                </Button>
+                {rootCheckError && !isRootAdmin && (
+                  <p className="text-[10px] text-red-500">{rootCheckError}</p>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="p-4 border-t border-[#F4511E]/30">
+            <Button
+              variant="outline"
+              onClick={handleLogout}
+              className="w-full border-[#F4511E]/40 text-[#F4511E] hover:bg-[#F4511E]/10 rounded-none text-xs"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Sair do Sistema
+            </Button>
+          </div>
+        </div>
       </aside>
 
-      <div className="md:pl-64">
-        <Header userName="Comandante Admin" isAdmin />
+      <div
+        className={`transition-[padding] duration-200 ease-linear ${
+          isSidebarOpen ? "md:pl-64" : "md:pl-0"
+        }`}
+      >
+        <Header
+          userName={adminDisplayName}
+          isAdmin
+          showSidebarToggle
+          onToggleSidebar={toggleSidebar}
+          sidebarOpen={isSidebarOpen}
+        />
         <main className="p-4 md:p-6">{children}</main>
       </div>
 
