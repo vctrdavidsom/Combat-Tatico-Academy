@@ -636,7 +636,11 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {availableCourses.length === 0 ? (
+              {isLoadingData ? (
+                <div className="border border-border bg-[#0a0a0a] p-6 text-sm text-[#6b7a5f]">
+                  Carregando cursos...
+                </div>
+              ) : availableCourses.length === 0 ? (
                 <div className="border border-border bg-[#0a0a0a] p-6 text-sm text-[#6b7a5f]">
                   Nenhum curso liberado no momento.
                 </div>
