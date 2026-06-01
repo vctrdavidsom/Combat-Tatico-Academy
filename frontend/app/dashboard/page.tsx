@@ -99,6 +99,14 @@ type ApiExamLog = {
   feedback?: string | null
 }
 
+type ApiCertificate = {
+  id: number
+  file_name: string
+  uploaded_at: string
+  user_id: number
+  course_id: number
+}
+
 type AttemptContext = {
   courseName: string
   moduleName?: string
@@ -127,6 +135,7 @@ export default function DashboardPage() {
   const ACCESS_TOKEN_KEY = "cta_access_token"
   const [courses, setCourses] = useState<ApiCourse[]>([])
   const [examLogs, setExamLogs] = useState<ApiExamLog[]>([])
+  const [certificates, setCertificates] = useState<ApiCertificate[]>([])
   const [isLoadingData, setIsLoadingData] = useState(false)
   const [dataError, setDataError] = useState("")
 
@@ -136,6 +145,7 @@ export default function DashboardPage() {
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [passwordMessage, setPasswordMessage] = useState("")
+  const [downloadingCertificateId, setDownloadingCertificateId] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const availableCourses = useMemo(() => courses, [courses])
@@ -153,21 +163,26 @@ export default function DashboardPage() {
         if (!token) {
           setCourses([])
           setExamLogs([])
+          setCertificates([])
           setDataError("Token nao encontrado. Faca login novamente.")
           return
         }
 
-        const [coursesResponse, logsResponse] = await Promise.all([
+        const [coursesResponse, logsResponse, certificatesResponse] = await Promise.all([
           fetch(`${API_BASE_URL}/courses/student/courses`, {
             headers: { Authorization: `Bearer ${token}` }
           }),
           fetch(`${API_BASE_URL}/exams/student/logs`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/certificates/student/certificates`, {
             headers: { Authorization: `Bearer ${token}` }
           })
         ])
 
         const coursesRaw = await coursesResponse.text()
         const logsRaw = await logsResponse.text()
+        const certificatesRaw = await certificatesResponse.text()
         const coursesData = coursesRaw ? JSON.parse(coursesRaw) : []
         const logsData = logsRaw ? JSON.parse(logsRaw) : []
 
@@ -184,10 +199,19 @@ export default function DashboardPage() {
         } else {
           setExamLogs(Array.isArray(logsData) ? logsData : [])
         }
+
+        if (!certificatesResponse.ok) {
+          setDataError((prev) => prev || certificatesRaw || "Erro ao carregar certificados.")
+          setCertificates([])
+        } else {
+          const certificatesData = certificatesRaw ? JSON.parse(certificatesRaw) : []
+          setCertificates(Array.isArray(certificatesData) ? certificatesData : [])
+        }
       } catch {
         setDataError("Falha ao conectar com o servidor.")
         setCourses([])
         setExamLogs([])
+        setCertificates([])
       } finally {
         setIsLoadingData(false)
       }
@@ -284,12 +308,65 @@ export default function DashboardPage() {
       if (question.type !== "multiple") return
       const weight = question.weight ?? 1
       total += 1
-      if (answers[question.id] === question.correct_index) {
+      const answerRaw = answers[question.id]
+      const answerValue = typeof answerRaw === "string" ? Number(answerRaw) : answerRaw
+      if (answerValue === question.correct_index) {
         correct += 1
         points += weight
       }
     })
     return { correct, total, points: Number(points.toFixed(2)) }
+  }
+
+  const resolveAttemptPoints = (attempt: ApiExamLog, totalPoints: number) => {
+    if (typeof attempt.score_points === "number") {
+      return attempt.score_points
+    }
+    return (attempt.score_percent / 100) * totalPoints
+  }
+
+  const selectBestAttempt = (attempts: ApiExamLog[], totalPoints: number) => {
+    if (!attempts.length) return null
+    const corrected = attempts.filter((attempt) => attempt.status === "corrigido")
+    const pool = corrected.length ? corrected : attempts
+    return pool.reduce((best, current) => {
+      const bestScore = resolveAttemptPoints(best, totalPoints)
+      const currentScore = resolveAttemptPoints(current, totalPoints)
+      if (currentScore > bestScore) return current
+      if (currentScore < bestScore) return best
+      const bestTime = new Date(best.submitted_at).getTime()
+      const currentTime = new Date(current.submitted_at).getTime()
+      if (!Number.isNaN(currentTime) && !Number.isNaN(bestTime) && currentTime > bestTime) {
+        return current
+      }
+      return best
+    })
+  }
+
+  const resolveApiError = (raw: string, data: unknown, fallback: string) => {
+    const detail = (data as { detail?: unknown } | null)?.detail
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => (item as { msg?: string })?.msg || JSON.stringify(item))
+        .join(" | ")
+    }
+    if (typeof detail === "string") {
+      return detail
+    }
+    if (detail) {
+      return JSON.stringify(detail)
+    }
+    return raw || fallback
+  }
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return "--"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return new Intl.DateTimeFormat("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short"
+    }).format(date)
   }
 
   const objectiveScore = useMemo((): ObjectiveScore | null => {
@@ -314,6 +391,16 @@ export default function DashboardPage() {
     return Number(((selectedAttempt.score_percent / 100) * total).toFixed(1))
   }, [selectedAttempt])
 
+  const coursesById = useMemo(() => {
+    return new Map(courses.map((course) => [course.id, course]))
+  }, [courses])
+
+  const sortedCertificates = useMemo(() => {
+    return [...certificates].sort(
+      (a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+    )
+  }, [certificates])
+
   const gradebook = useMemo(() => {
     if (!currentUser) return []
 
@@ -329,20 +416,20 @@ export default function DashboardPage() {
               attempt.course_id === course.id &&
               attempt.exam_id === item.id
           )
-          const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
+          const bestAttempt = selectBestAttempt(attempts, totalPoints)
           let earnedPoints = 0
           let statusLabel = "Sem envio"
 
-          if (lastAttempt) {
-            if (lastAttempt.status === "corrigido") {
-              if (typeof lastAttempt.score_points === "number") {
-                earnedPoints = Number(lastAttempt.score_points.toFixed(1))
+          if (bestAttempt) {
+            if (bestAttempt.status === "corrigido") {
+              if (typeof bestAttempt.score_points === "number") {
+                earnedPoints = Number(bestAttempt.score_points.toFixed(1))
               } else {
-                earnedPoints = Number(((lastAttempt.score_percent / 100) * totalPoints).toFixed(1))
+                earnedPoints = Number(((bestAttempt.score_percent / 100) * totalPoints).toFixed(1))
               }
-              statusLabel = lastAttempt.result === "apto" ? "Apto" : "Reprovado"
+              statusLabel = bestAttempt.result === "apto" ? "Apto" : "Reprovado"
             } else {
-              const partial = sumObjectivePoints(questions, lastAttempt.answers)
+              const partial = sumObjectivePoints(questions, bestAttempt.answers)
               earnedPoints = Number(partial.points.toFixed(1))
               statusLabel = "Pendente"
             }
@@ -404,6 +491,53 @@ export default function DashboardPage() {
     reader.readAsDataURL(file)
   }
 
+  const handleDownloadCertificate = async (certificate: ApiCertificate) => {
+    setDataError("")
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+    if (!token) {
+      setDataError("Token nao encontrado. Faca login novamente.")
+      return
+    }
+
+    setDownloadingCertificateId(certificate.id)
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/certificates/student/certificates/${certificate.id}/download`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      )
+
+      if (!response.ok) {
+        const raw = await response.text()
+        let parsed: unknown = null
+        try {
+          parsed = raw ? JSON.parse(raw) : null
+        } catch {
+          parsed = null
+        }
+        setDataError(resolveApiError(raw, parsed, "Falha ao baixar certificado."))
+        return
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = certificate.file_name || "certificado.pdf"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setDataError("Falha ao conectar com o servidor.")
+    } finally {
+      setDownloadingCertificateId(null)
+    }
+  }
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -413,9 +547,9 @@ export default function DashboardPage() {
   }
 
   const documents = currentUser.documents || []
-  const certificate = currentUser.certificate
-  const certificateLabel = certificate?.fileUrl
-    ? certificate.fileUrl.split("/").pop() || "Certificado"
+  const legacyCertificate = currentUser.certificate
+  const legacyCertificateLabel = legacyCertificate?.fileUrl
+    ? legacyCertificate.fileUrl.split("/").pop() || "Certificado"
     : "Certificado"
 
   return (
@@ -597,18 +731,44 @@ export default function DashboardPage() {
                     <Award className="h-4 w-4 text-[#F4511E]" />
                     <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Certificado</h2>
                   </div>
-                  {certificate ? (
+                  {sortedCertificates.length > 0 ? (
+                    <div className="space-y-3 text-xs">
+                      {sortedCertificates.map((certificate) => {
+                        const course = coursesById.get(certificate.course_id)
+                        return (
+                          <div key={certificate.id} className="border border-border p-3 space-y-2">
+                            <div>
+                              <p className="text-[#6b7a5f] uppercase tracking-wider">Arquivo</p>
+                              <p className="text-foreground break-all">{certificate.file_name}</p>
+                              <p className="text-[10px] text-[#6b7a5f]">
+                                {course ? `${course.code} - ${course.name}` : `Curso ${certificate.course_id}`}
+                              </p>
+                              <p className="text-[10px] text-[#6b7a5f]">
+                                {formatDateTime(certificate.uploaded_at)}
+                              </p>
+                            </div>
+                            <Button
+                              onClick={() => handleDownloadCertificate(certificate)}
+                              disabled={downloadingCertificateId === certificate.id}
+                              className="bg-[#F4511E] text-black rounded-none text-xs"
+                            >
+                              {downloadingCertificateId === certificate.id
+                                ? "Baixando..."
+                                : "Baixar certificado"}
+                            </Button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : legacyCertificate ? (
                     <div className="space-y-2 text-xs">
                       <div>
                         <p className="text-[#6b7a5f] uppercase tracking-wider">Arquivo</p>
-                        <p className="text-foreground break-all">{certificateLabel}</p>
-                        <p className="text-[10px] text-[#6b7a5f]">Curso {certificate.courseId}</p>
+                        <p className="text-foreground break-all">{legacyCertificateLabel}</p>
+                        <p className="text-[10px] text-[#6b7a5f]">Curso {legacyCertificate.courseId}</p>
                       </div>
-                      <Button
-                        asChild
-                        className="bg-[#F4511E] text-black rounded-none"
-                      >
-                        <a href={certificate.fileUrl} download>
+                      <Button asChild className="bg-[#F4511E] text-black rounded-none">
+                        <a href={legacyCertificate.fileUrl} download>
                           Baixar certificado
                         </a>
                       </Button>

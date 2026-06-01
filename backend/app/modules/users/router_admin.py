@@ -1,14 +1,64 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+import secrets
 from sqlmodel import Session, select
 from app.core.database import get_session
+from app.core.config import settings
+from app.core.security import get_password_hash
 from app.modules.users.dependencies import get_current_admin
-from app.modules.users.models import User
-from app.modules.users.schemas import UserPublic, UserAdminUpdate
+from app.modules.users.models import User, UserRole
+from app.modules.users.schemas import UserPublic, UserAdminUpdate, AdminCreate, AdminCreateResponse
 from sqlmodel import delete
 from app.modules.courses.models import Enrollment, Course
 from app.modules.users.schemas import UserCourseSync
 
 router = APIRouter(prefix="/admin", tags=["Users"])
+
+def is_root_admin(admin: User) -> bool:
+    return admin.email == settings.FIRST_ADMIN_EMAIL
+
+@router.get("/root-check")
+def root_check(current_admin: User = Depends(get_current_admin)):
+    return {"is_root_admin": is_root_admin(current_admin)}
+
+@router.post("/create-admin", response_model=AdminCreateResponse, status_code=status.HTTP_201_CREATED)
+def create_admin_profile(
+    admin_in: AdminCreate,
+    session: Session = Depends(get_session),
+    current_admin: User = Depends(get_current_admin)
+):
+    if not is_root_admin(current_admin):
+        raise HTTPException(status_code=403, detail="Apenas o administrador root pode criar novos admins.")
+
+    email_lower = admin_in.email.strip().lower()
+    if not email_lower.endswith("@combat.admin"):
+        raise HTTPException(status_code=400, detail="E-mail deve terminar com @combat.admin")
+
+    statement_email = select(User).where(User.email == email_lower)
+    if session.exec(statement_email).first():
+        raise HTTPException(status_code=400, detail="E-mail já registado.")
+
+    if len(admin_in.password) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter no mínimo 6 caracteres.")
+
+    while True:
+        cpf_placeholder = f"ADMIN-{secrets.token_hex(4)}"
+        if not session.exec(select(User).where(User.cpf == cpf_placeholder)).first():
+            break
+
+    new_admin = User(
+        full_name=admin_in.full_name.strip(),
+        cpf=cpf_placeholder,
+        email=email_lower,
+        hashed_password=get_password_hash(admin_in.password),
+        role=UserRole.ADMIN,
+        is_active=True
+    )
+
+    session.add(new_admin)
+    session.commit()
+    session.refresh(new_admin)
+
+    return {"user": new_admin}
 
 @router.get("/", response_model=list[UserPublic])
 def list_all_users(
@@ -47,6 +97,10 @@ def admin_update_user(
     
     # Atualiza apenas os campos enviados no corpo da requisição
     user_data = user_in.model_dump(exclude_unset=True)
+
+    if "role" in user_data and user_data["role"] != db_user.role:
+        if not is_root_admin(current_admin):
+            raise HTTPException(status_code=403, detail="Apenas o administrador root pode alterar cargos.")
     for key, value in user_data.items():
         setattr(db_user, key, value)
         

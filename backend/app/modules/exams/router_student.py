@@ -22,13 +22,13 @@ def normalize_answer(value: object):
 
 def calculate_exam_score(exam: Exam, answers: dict[int, str | int]):
 	objective_total = 0.0
-	total_points = 0.0
+	all_points = 0.0
 	score_points = 0.0
 	has_essay = False
 
 	for question in exam.questions:
 		weight = question.weight or 1
-		total_points += weight
+		all_points += weight
 
 		if question.type != "multiple":
 			has_essay = True
@@ -48,10 +48,13 @@ def calculate_exam_score(exam: Exam, answers: dict[int, str | int]):
 	if objective_total > 0:
 		score_percent = round((score_points / objective_total) * 100)
 
-	resolved_total = exam.total_points if exam.total_points is not None else total_points
+	resolved_total = exam.total_points if exam.total_points is not None else all_points
+	normalized_points = score_points
+	if not has_essay and objective_total > 0 and resolved_total and resolved_total != objective_total:
+		normalized_points = (score_points / objective_total) * resolved_total
 	return {
 		"score_percent": score_percent,
-		"score_points": round(score_points, 2),
+		"score_points": round(normalized_points, 2),
 		"total_points": round(resolved_total, 2),
 		"has_essay": has_essay
 	}

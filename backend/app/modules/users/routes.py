@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
 from app.core.database import get_session
 from app.core.security import verify_password, get_password_hash, create_access_token
-from app.modules.users.models import User
+from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserCreate, UserPublic, Token, UserUpdate
 from app.modules.users.dependencies import get_current_user
 
@@ -27,6 +27,7 @@ def register_user(user_in: UserCreate, session: Session = Depends(get_session)):
 
     # 3. Extrai todos os dados do schema (incluindo os novos como cpf, city, etc)
     user_data = user_in.model_dump()
+    user_data["role"] = UserRole.STUDENT
     raw_password = user_data.pop("password") # Tira a senha pura para criar o hash
     
     # 4. Injeta os dados no modelo User de forma dinâmica

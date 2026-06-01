@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 from app.core.database import get_session
 from app.modules.users.dependencies import get_current_admin
+from app.core.links import normalize_google_drive_download_url
 from app.modules.users.models import User
 from app.modules.courses.models import Module
 from app.modules.lessons.models import Lesson
@@ -21,12 +22,13 @@ def create_lesson(
 	if not module:
 		raise HTTPException(status_code=404, detail="Modulo nao encontrado.")
 
+	normalized_pdf_url = normalize_google_drive_download_url(lesson_in.material_pdf_url)
 	db_lesson = Lesson(
 		title=lesson_in.title,
 		type=lesson_in.type,
 		video_id=lesson_in.video_id,
 		duration=lesson_in.duration,
-		material_pdf_url=lesson_in.material_pdf_url,
+		material_pdf_url=normalized_pdf_url,
 		material_link_url=lesson_in.material_link_url,
 		order=lesson_in.order or 1,
 		is_active=lesson_in.is_active if lesson_in.is_active is not None else True,
@@ -72,6 +74,10 @@ def update_lesson(
 		raise HTTPException(status_code=404, detail="Aula nao encontrada.")
 
 	lesson_data = lesson_in.model_dump(exclude_unset=True)
+	if "material_pdf_url" in lesson_data:
+		lesson_data["material_pdf_url"] = normalize_google_drive_download_url(
+			lesson_data.get("material_pdf_url")
+		)
 	for key, value in lesson_data.items():
 		setattr(lesson, key, value)
 

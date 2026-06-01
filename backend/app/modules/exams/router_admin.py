@@ -154,20 +154,32 @@ def update_exam(
 		session.exec(delete(Question).where(Question.exam_id == exam.id))
 		session.commit()
 
+		def read_field(item, key, default=None):
+			if isinstance(item, dict):
+				return item.get(key, default)
+			return getattr(item, key, default)
+
 		for question_in in questions_payload:
+			question_type = read_field(question_in, "type", "multiple")
+			prompt = read_field(question_in, "prompt", "")
+			weight = read_field(question_in, "weight", 1)
+			order = read_field(question_in, "order", 1)
+			options = read_field(question_in, "options", []) or []
+			correct_index = read_field(question_in, "correct_index", None)
+
 			question = Question(
-				type=question_in.type,
-				prompt=question_in.prompt,
-				weight=question_in.weight,
-				order=question_in.order or 1,
+				type=question_type,
+				prompt=prompt,
+				weight=weight,
+				order=order or 1,
 				exam_id=exam.id
 			)
 			session.add(question)
 			session.commit()
 			session.refresh(question)
 
-			for index, option in enumerate(question_in.options):
-				is_correct = question_in.correct_index == index
+			for index, option in enumerate(options):
+				is_correct = correct_index == index
 				alternative = Alternative(
 					text=option,
 					is_correct=is_correct,

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { FileText, Link2, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { normalizeGoogleDriveDownloadUrl } from "@/lib/links"
 
 type LibraryItemType = "pdf" | "link"
 
@@ -263,7 +264,14 @@ export default function LibraryPage() {
           <Input
             placeholder="URL do arquivo"
             value={newItem.url}
-            onChange={(e) => setNewItem({ ...newItem, url: e.target.value })}
+            onChange={(e) =>
+              setNewItem({
+                ...newItem,
+                url: newItem.type === "pdf"
+                  ? normalizeGoogleDriveDownloadUrl(e.target.value)
+                  : e.target.value
+              })
+            }
             className="border-border bg-secondary rounded-none"
           />
           <Input
@@ -356,7 +364,13 @@ export default function LibraryPage() {
                       )
                     )
                   }
-                  onBlur={(e) => handleUpdateItem(item.id, { url: e.target.value })}
+                  onBlur={(e) =>
+                    handleUpdateItem(item.id, {
+                      url: item.type === "pdf"
+                        ? normalizeGoogleDriveDownloadUrl(e.target.value)
+                        : e.target.value
+                    })
+                  }
                   className="border-border bg-secondary rounded-none"
                 />
                 <Input

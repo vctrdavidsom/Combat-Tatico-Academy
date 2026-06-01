@@ -7,6 +7,8 @@ from app.modules.courses.models import Course, Module, Enrollment
 from app.modules.lessons.models import Lesson
 from app.modules.exams.models import Exam, Question, Alternative, ExamLog
 from app.modules.curriculum.models import LibraryItem
+from app.modules.certificates.models import Certificate
+from app.modules.debates.models import DebateMessage
 
 from app.modules.users.utils import create_first_admin
 
@@ -16,6 +18,8 @@ from app.modules.courses.routes import router as courses_router
 from app.modules.lessons.routes import router as lessons_router
 from app.modules.exams.routes import router as exams_router
 from app.modules.curriculum.routes import router as library_router
+from app.modules.certificates.routes import router as certificates_router
+from app.modules.debates.routes import router as debates_router
 
 
 @asynccontextmanager
@@ -48,6 +52,8 @@ app.include_router(courses_router)
 app.include_router(lessons_router)
 app.include_router(exams_router)
 app.include_router(library_router)
+app.include_router(certificates_router)
+app.include_router(debates_router)
 
 # Rota de teste simples
 @app.get("/", tags=["Health Check"])

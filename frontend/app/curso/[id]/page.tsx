@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   Play,
@@ -36,6 +36,8 @@ type ApiExam = {
   total_points?: number | null
   cut_score?: number | null
   duration_minutes?: number | null
+  start_date?: string | null
+  due_date?: string | null
   questions: ApiQuestion[]
 }
 
@@ -77,6 +79,16 @@ type ApiExamLog = {
   course_id?: number | null
 }
 
+type DebateMessage = {
+  id: number
+  lesson_id: number
+  user_id: number
+  user_name: string
+  content: string
+  created_at: string
+  is_visible: boolean
+}
+
 type LibraryItem = {
   id: number
   title: string
@@ -106,6 +118,10 @@ export default function CoursePage() {
   const [activeModuleIndex, setActiveModuleIndex] = useState(0)
   const [activeItemIndex, setActiveItemIndex] = useState(0)
   const [newComment, setNewComment] = useState("")
+  const [debateMessages, setDebateMessages] = useState<DebateMessage[]>([])
+  const [isLoadingDebate, setIsLoadingDebate] = useState(false)
+  const [isSendingDebate, setIsSendingDebate] = useState(false)
+  const [debateError, setDebateError] = useState("")
   const [isPlaying, setIsPlaying] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState("")
@@ -114,6 +130,45 @@ export default function CoursePage() {
     ...module.lessons.map((lesson) => ({ kind: "lesson" as const, lesson })),
     ...module.exams.map((exam) => ({ kind: "exam" as const, exam }))
   ]
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return ""
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return value
+    return parsed.toLocaleString("pt-BR")
+  }
+
+  const loadDebateMessages = useCallback(async (lessonId: number) => {
+    setDebateError("")
+    setIsLoadingDebate(true)
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setDebateError("Token nao encontrado. Faca login novamente.")
+        setDebateMessages([])
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/debates/student/lessons/${lessonId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const raw = await response.text()
+
+      if (!response.ok) {
+        setDebateError(raw || "Erro ao carregar debate.")
+        setDebateMessages([])
+        return
+      }
+
+      const data = raw ? JSON.parse(raw) : []
+      setDebateMessages(Array.isArray(data) ? data : [])
+    } catch {
+      setDebateError("Falha ao carregar debate.")
+      setDebateMessages([])
+    } finally {
+      setIsLoadingDebate(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!courseId) return
@@ -202,8 +257,71 @@ export default function CoursePage() {
   const activeEntry = activeEntries[activeItemIndex]
   const activeLesson = activeEntry?.kind === "lesson" ? activeEntry.lesson : null
   const activeExam = activeEntry?.kind === "exam" ? activeEntry.exam : null
+  const isDebateDisabled = !activeLesson
+
+  useEffect(() => {
+    if (!activeLesson) {
+      setDebateMessages([])
+      setDebateError("")
+      setNewComment("")
+      return
+    }
+
+    loadDebateMessages(activeLesson.id)
+    setNewComment("")
+  }, [activeLesson?.id, loadDebateMessages])
 
   const handlePlay = () => setIsPlaying(true)
+
+  const handleSendDebate = async () => {
+    if (!activeLesson) {
+      setDebateError("Debate disponivel apenas em aulas.")
+      return
+    }
+
+    const content = newComment.trim()
+    if (!content) {
+      setDebateError("Digite uma mensagem antes de enviar.")
+      return
+    }
+
+    setDebateError("")
+    setIsSendingDebate(true)
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setDebateError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/debates/student/lessons/${activeLesson.id}/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ content })
+      })
+
+      const raw = await response.text()
+      if (!response.ok) {
+        setDebateError(raw || "Erro ao enviar mensagem.")
+        return
+      }
+
+      const created = raw ? (JSON.parse(raw) as DebateMessage) : null
+      if (created) {
+        setDebateMessages((prev) => [created, ...prev])
+      } else {
+        await loadDebateMessages(activeLesson.id)
+      }
+      setNewComment("")
+    } catch {
+      setDebateError("Falha ao enviar mensagem.")
+    } finally {
+      setIsSendingDebate(false)
+    }
+  }
 
   const handleContentClick = (mi: number, ii: number) => {
     setActiveModuleIndex(mi)
@@ -215,8 +333,38 @@ export default function CoursePage() {
     router.push(`/curso/${courseId}/missao?type=activity&moduleId=${moduleId}&examId=${examId}`)
   }
 
-  const attemptsForExam = (examId: number) =>
-    examLogs.some((attempt) => attempt.exam_id === examId)
+  const countAttemptsForExam = (examId: number) =>
+    examLogs.filter(
+      (attempt) =>
+        attempt.exam_id === examId &&
+        (attempt.course_id == null || attempt.course_id === courseId)
+    ).length
+
+  const hasExhaustedAttempts = (exam: ApiExam) => {
+    if (!exam.attempt_limit || exam.attempt_limit <= 0) return false
+    return countAttemptsForExam(exam.id) >= exam.attempt_limit
+  }
+
+  const resolveExamWindow = (exam: ApiExam) => {
+    const startDate = exam.start_date ? new Date(exam.start_date) : null
+    const dueDate = exam.due_date ? new Date(exam.due_date) : null
+    const startValid = startDate && !Number.isNaN(startDate.getTime()) ? startDate : null
+    const dueValid = dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate : null
+    const now = new Date()
+    if (startValid && now < startValid) {
+      return {
+        canStart: false,
+        message: `Atividade liberada em ${startValid.toLocaleString("pt-BR")}`
+      }
+    }
+    if (dueValid && now > dueValid) {
+      return {
+        canStart: false,
+        message: `Atividade encerrada${dueValid ? ` em ${dueValid.toLocaleString("pt-BR")}` : ""}`
+      }
+    }
+    return { canStart: true, message: "" }
+  }
 
   if (isLoading) {
     return (
@@ -289,25 +437,45 @@ export default function CoursePage() {
                 {activeLesson?.type === "material" && (
                   <div>
                     <h3 className="font-medium mb-2">Materiais (Biblioteca Global)</h3>
+                    {(activeLesson.material_pdf_url || activeLesson.material_link_url) && (
+                      <p className="text-xs uppercase tracking-wider text-[#F4511E] mb-2">
+                        Baixar conteudo
+                      </p>
+                    )}
                     <ul className="space-y-2">
                       {activeLesson.material_pdf_url && (
                         <li>
-                          <a href={activeLesson.material_pdf_url} target="_blank" rel="noreferrer" className="text-primary">
-                            {activeLesson.material_pdf_url}
+                          <a
+                            href={activeLesson.material_pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary inline-flex items-center gap-2"
+                          >
+                            <Download className="h-4 w-4" /> Baixar PDF
                           </a>
                         </li>
                       )}
                       {activeLesson.material_link_url && (
                         <li>
-                          <a href={activeLesson.material_link_url} target="_blank" rel="noreferrer" className="text-primary">
-                            {activeLesson.material_link_url}
+                          <a
+                            href={activeLesson.material_link_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary inline-flex items-center gap-2"
+                          >
+                            <Download className="h-4 w-4" /> Baixar conteudo
                           </a>
                         </li>
                       )}
                       {libraryItems.map((lib) => (
                         <li key={lib.id}>
-                          <a href={lib.url} target="_blank" rel="noreferrer" className="text-primary">
-                            {lib.title}
+                          <a
+                            href={lib.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary inline-flex items-center gap-2"
+                          >
+                            <Download className="h-4 w-4" /> {lib.title}
                           </a>
                         </li>
                       ))}
@@ -319,10 +487,33 @@ export default function CoursePage() {
                   <div>
                     <p className="mb-2">Atividade: {activeExam.title}</p>
                     <p className="mb-2">Tentativas permitidas: {activeExam.attempt_limit}</p>
-                    <Button onClick={() => startActivity(activeModule?.id || 0, activeExam.id)}>Iniciar Atividade</Button>
-                    {attemptsForExam(activeExam.id) && (
-                      <p className="text-xs text-[#6b7a5f] mt-2">Atividade registrada como enviada.</p>
-                    )}
+                    {(() => {
+                      const availability = resolveExamWindow(activeExam)
+                      const attemptsUsed = countAttemptsForExam(activeExam.id)
+                      const attemptsExhausted = hasExhaustedAttempts(activeExam)
+                      const canStart = availability.canStart && !attemptsExhausted
+                      const message = attemptsExhausted
+                        ? "Tentativas esgotadas."
+                        : availability.message
+                      return (
+                        <>
+                          <Button
+                            onClick={() => startActivity(activeModule?.id || 0, activeExam.id)}
+                            disabled={!canStart}
+                          >
+                            Iniciar Atividade
+                          </Button>
+                          {!canStart && message && (
+                            <p className="text-xs text-[#F4511E] mt-2">{message}</p>
+                          )}
+                          {attemptsUsed > 0 && (
+                            <p className="text-xs text-[#6b7a5f] mt-2">
+                              Tentativas usadas: {attemptsUsed}/{activeExam.attempt_limit}
+                            </p>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                 )}
               </div>
@@ -350,13 +541,51 @@ export default function CoursePage() {
               <h3 className="font-bold text-foreground uppercase tracking-wider">Debate Tecnico</h3>
             </div>
             <div className="p-4 border-b border-border">
+              {isDebateDisabled ? (
+                <p className="text-sm text-[#6b7a5f]">Debate disponivel apenas em aulas.</p>
+              ) : (
+                <div className="space-y-3">
+                  {debateError && <p className="text-xs text-[#F4511E]">{debateError}</p>}
+                  {isLoadingDebate ? (
+                    <p className="text-sm text-[#6b7a5f]">Carregando debate...</p>
+                  ) : debateMessages.length ? (
+                    <ul className="space-y-3">
+                      {debateMessages.map((message) => (
+                        <li key={message.id} className="border border-border bg-secondary/30 p-3">
+                          <div className="flex items-center justify-between text-xs text-[#6b7a5f] mb-2">
+                            <span className="font-semibold text-foreground">{message.user_name}</span>
+                            <span>{formatDateTime(message.created_at)}</span>
+                          </div>
+                          <p className="text-sm text-foreground whitespace-pre-line">{message.content}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-[#6b7a5f]">Seja o primeiro a iniciar o debate desta aula.</p>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="flex h-10 w-10 items-center justify-center bg-[#6b7a5f]/20 border border-[#6b7a5f] shrink-0">
                   <User className="h-5 w-5 text-[#6b7a5f]" />
                 </div>
                 <div className="flex-1 flex flex-col gap-2 sm:flex-row">
-                  <Input placeholder="Compartilhe sua analise tecnica..." value={newComment} onChange={(e) => setNewComment(e.target.value)} className="flex-1 border-border bg-secondary rounded-none text-sm" />
-                  <Button className="bg-[#F4511E] hover:bg-[#F4511E]/90 rounded-none px-4 w-full sm:w-auto"><Send className="h-4 w-4" /></Button>
+                  <Input
+                    placeholder={isDebateDisabled ? "Selecione uma aula para debater." : "Compartilhe sua analise tecnica..."}
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    disabled={isDebateDisabled || isSendingDebate}
+                    className="flex-1 border-border bg-secondary rounded-none text-sm"
+                  />
+                  <Button
+                    onClick={handleSendDebate}
+                    disabled={isDebateDisabled || isSendingDebate || !newComment.trim()}
+                    className="bg-[#F4511E] hover:bg-[#F4511E]/90 rounded-none px-4 w-full sm:w-auto"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </div>

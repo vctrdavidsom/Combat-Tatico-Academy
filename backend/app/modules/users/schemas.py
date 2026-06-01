@@ -63,3 +63,12 @@ class UserAdminUpdate(UserUpdate):
 class UserCourseSync(BaseModel):
     """Recebe a lista de IDs de cursos que devem ficar liberados para o aluno."""
     course_ids: List[int]
+
+class AdminCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    password: str
+
+class AdminCreateResponse(BaseModel):
+    user: UserPublic
+    temporary_password: Optional[str] = None

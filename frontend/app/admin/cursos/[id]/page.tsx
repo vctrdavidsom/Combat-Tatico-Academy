@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/admin/rich-text-editor"
+import { normalizeGoogleDriveDownloadUrl } from "@/lib/links"
 
 type ApiModule = {
   id: number
@@ -57,7 +58,7 @@ type ApiQuestion = {
 type ApiExam = {
   id: number
   title: string
-  type: "activity" | "final"
+  type: "activity" | "module" | "final"
   draw_count: number
   attempt_limit: number
   total_points?: number | null
@@ -105,7 +106,7 @@ type NewQuestionDraft = {
 
 type NewExamDraft = {
   title: string
-  type: "activity" | "final"
+  type: "activity" | "module" | "final"
   attempt_limit: string
   total_points: string
   cut_score: string
@@ -197,6 +198,7 @@ export default function AdminCourseDetailPage() {
   const [activeModuleId, setActiveModuleId] = useState<number | null>(null)
   const [showAddLessonModal, setShowAddLessonModal] = useState(false)
   const [showAddExamModal, setShowAddExamModal] = useState(false)
+  const [editingLessonId, setEditingLessonId] = useState<number | null>(null)
   const [editingExamId, setEditingExamId] = useState<number | null>(null)
   const [newLesson, setNewLesson] = useState<NewLessonDraft>({
     title: "",
@@ -532,6 +534,7 @@ export default function AdminCourseDetailPage() {
   const openAddLessonModal = (moduleId: number) => {
     setActiveModuleId(moduleId)
     setContentError("")
+    setEditingLessonId(null)
     setNewLesson({
       title: "",
       type: "video",
@@ -540,6 +543,22 @@ export default function AdminCourseDetailPage() {
       material_pdf_url: "",
       material_link_url: "",
       is_active: true
+    })
+    setShowAddLessonModal(true)
+  }
+
+  const openEditLessonModal = (moduleId: number, lesson: ApiLesson) => {
+    setActiveModuleId(moduleId)
+    setContentError("")
+    setEditingLessonId(lesson.id)
+    setNewLesson({
+      title: lesson.title,
+      type: lesson.type,
+      video_id: lesson.video_id ?? "",
+      duration: lesson.duration ?? "",
+      material_pdf_url: lesson.material_pdf_url ?? "",
+      material_link_url: lesson.material_link_url ?? "",
+      is_active: lesson.is_active
     })
     setShowAddLessonModal(true)
   }
@@ -588,7 +607,7 @@ export default function AdminCourseDetailPage() {
     setShowAddExamModal(true)
   }
 
-  const handleAddLesson = async () => {
+  const handleSaveLesson = async () => {
     if (!course || !activeModuleId || !newLesson.title || isCreatingContent) return
     setContentError("")
     setIsCreatingContent(true)
@@ -604,7 +623,11 @@ export default function AdminCourseDetailPage() {
       const nextOrder = targetModule?.lessons?.length
         ? Math.max(...targetModule.lessons.map((lesson) => lesson.order)) + 1
         : 1
+      const editingLesson = editingLessonId
+        ? course.modules.flatMap((module) => module.lessons).find((lesson) => lesson.id === editingLessonId)
+        : null
 
+      const isEditing = editingLessonId !== null
       const payload = {
         title: newLesson.title,
         type: newLesson.type,
@@ -612,12 +635,15 @@ export default function AdminCourseDetailPage() {
         duration: newLesson.duration || null,
         material_pdf_url: newLesson.type === "material" ? newLesson.material_pdf_url || null : null,
         material_link_url: newLesson.type === "material" ? newLesson.material_link_url || null : null,
-        order: nextOrder,
+        order: isEditing ? editingLesson?.order ?? nextOrder : nextOrder,
         is_active: newLesson.is_active
       }
 
-      const response = await fetch(`${API_BASE_URL}/lessons/admin/modules/${activeModuleId}/lessons`, {
-        method: "POST",
+      const endpoint = isEditing
+        ? `${API_BASE_URL}/lessons/admin/lessons/${editingLessonId}`
+        : `${API_BASE_URL}/lessons/admin/modules/${activeModuleId}/lessons`
+      const response = await fetch(endpoint, {
+        method: isEditing ? "PATCH" : "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
@@ -636,19 +662,70 @@ export default function AdminCourseDetailPage() {
         prev
           ? {
               ...prev,
-              modules: prev.modules.map((module) =>
-                module.id === activeModuleId
-                  ? { ...module, lessons: [...module.lessons, created] }
-                  : module
-              )
+              modules: prev.modules.map((module) => {
+                if (module.id !== created.module_id) return module
+                if (isEditing) {
+                  return {
+                    ...module,
+                    lessons: module.lessons.map((lesson) =>
+                      lesson.id === created.id ? created : lesson
+                    )
+                  }
+                }
+                return { ...module, lessons: [...module.lessons, created] }
+              })
             }
           : prev
       )
+      await loadCourse()
+      setEditingLessonId(null)
       setShowAddLessonModal(false)
     } catch {
       setContentError("Falha ao conectar com o servidor.")
     } finally {
       setIsCreatingContent(false)
+    }
+  }
+
+  const handleDeleteLesson = async (lessonId: number) => {
+    if (!course) return
+    const confirmed = window.confirm("Remover esta aula?")
+    if (!confirmed) return
+
+    setContentError("")
+    try {
+      const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+      if (!token) {
+        setContentError("Token nao encontrado. Faca login novamente.")
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/lessons/admin/lessons/${lessonId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const { data, raw } = await readJsonResponse<{ detail?: unknown }>(response)
+      if (!response.ok) {
+        setContentError(resolveApiError(raw, data, "Erro ao remover aula."))
+        return
+      }
+
+      setCourse((prev) =>
+        prev
+          ? {
+              ...prev,
+              modules: prev.modules.map((module) => ({
+                ...module,
+                lessons: module.lessons.filter((lesson) => lesson.id !== lessonId)
+              }))
+            }
+          : prev
+      )
+    } catch {
+      setContentError("Falha ao conectar com o servidor.")
     }
   }
 
@@ -736,6 +813,7 @@ export default function AdminCourseDetailPage() {
             }
           : prev
       )
+      await loadCourse()
       setEditingExamId(null)
       setShowAddExamModal(false)
     } catch {
@@ -782,6 +860,7 @@ export default function AdminCourseDetailPage() {
             }
           : prev
       )
+      await loadCourse()
     } catch {
       setContentError("Falha ao conectar com o servidor.")
     }
@@ -1137,13 +1216,27 @@ export default function AdminCourseDetailPage() {
                                       </p>
                                       <p className="text-sm text-foreground">{lesson.title}</p>
                                     </div>
-                                    <span
-                                      className={`text-[10px] uppercase tracking-wider ${
-                                        lesson.is_active ? "text-green-400" : "text-yellow-400"
-                                      }`}
-                                    >
-                                      {lesson.is_active ? "ativo" : "inativo"}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => openEditLessonModal(module.id, lesson)}
+                                        className="text-[10px] uppercase tracking-wider text-[#F4511E]"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteLesson(lesson.id)}
+                                        className="text-[10px] uppercase tracking-wider text-red-500"
+                                      >
+                                        Excluir
+                                      </button>
+                                      <span
+                                        className={`text-[10px] uppercase tracking-wider ${
+                                          lesson.is_active ? "text-green-400" : "text-yellow-400"
+                                        }`}
+                                      >
+                                        {lesson.is_active ? "ativo" : "inativo"}
+                                      </span>
+                                    </div>
                                   </div>
                                   {lesson.type === "video" && lesson.video_id && (
                                     <p className="text-[10px] text-[#6b7a5f] mt-1">Video ID: {lesson.video_id}</p>
@@ -1305,8 +1398,12 @@ export default function AdminCourseDetailPage() {
           <div className="bg-card border border-border w-full max-w-lg my-8 max-h-[calc(100vh-2rem)] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div>
-                <h2 className="font-bold text-foreground">Nova Aula</h2>
-                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Adicionar conteudo</p>
+                <h2 className="font-bold text-foreground">
+                  {editingLessonId ? "Editar Aula" : "Nova Aula"}
+                </h2>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">
+                  {editingLessonId ? "Atualizar conteudo" : "Adicionar conteudo"}
+                </p>
               </div>
               <button
                 onClick={() => setShowAddLessonModal(false)}
@@ -1377,7 +1474,10 @@ export default function AdminCourseDetailPage() {
                     <Input
                       value={newLesson.material_pdf_url}
                       onChange={(event) =>
-                        setNewLesson({ ...newLesson, material_pdf_url: event.target.value })
+                        setNewLesson({
+                          ...newLesson,
+                          material_pdf_url: normalizeGoogleDriveDownloadUrl(event.target.value)
+                        })
                       }
                       className="border-border bg-secondary rounded-none"
                     />
@@ -1418,11 +1518,15 @@ export default function AdminCourseDetailPage() {
                 Cancelar
               </Button>
               <Button
-                onClick={handleAddLesson}
+                onClick={handleSaveLesson}
                 disabled={!newLesson.title || isCreatingContent}
                 className="flex-1 bg-[#F4511E] hover:bg-[#F4511E]/90 text-white rounded-none disabled:opacity-50"
               >
-                {isCreatingContent ? "Salvando..." : "Criar aula"}
+                {isCreatingContent
+                  ? "Salvando..."
+                  : editingLessonId
+                    ? "Salvar aula"
+                    : "Criar aula"}
               </Button>
             </div>
           </div>

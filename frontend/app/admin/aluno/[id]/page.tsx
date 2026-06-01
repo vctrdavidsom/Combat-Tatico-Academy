@@ -79,6 +79,14 @@ type AdminUser = {
   is_active: boolean
 }
 
+type ApiCertificate = {
+  id: number
+  file_name: string
+  uploaded_at: string
+  user_id: number
+  course_id: number
+}
+
 export default function StudentAdminPage() {
   const API_BASE_URL = "/api"
   const ACCESS_TOKEN_KEY = "cta_access_token"
@@ -95,6 +103,12 @@ export default function StudentAdminPage() {
   const [isLoadingData, setIsLoadingData] = useState(false)
   const [dataError, setDataError] = useState("")
   const [essayDrafts, setEssayDrafts] = useState<Record<number, { grade?: string; feedback?: string }>>({})
+  const [certificates, setCertificates] = useState<ApiCertificate[]>([])
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadTargetCourseId, setUploadTargetCourseId] = useState<number | null>(null)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState("")
 
   const readJsonResponse = async <T,>(response: Response) => {
     const raw = await response.text()
@@ -207,10 +221,11 @@ export default function StudentAdminPage() {
           setCourses([])
           setExamLogs([])
           setEnrolledCourseIds([])
+          setCertificates([])
           return
         }
 
-        const [coursesResponse, enrolledResponse, logsResponse] = await Promise.all([
+        const [coursesResponse, enrolledResponse, logsResponse, certificatesResponse] = await Promise.all([
           fetch(`${API_BASE_URL}/courses/admin/courses`, {
             headers: { Authorization: `Bearer ${token}` }
           }),
@@ -219,12 +234,16 @@ export default function StudentAdminPage() {
           }),
           fetch(`${API_BASE_URL}/exams/admin/logs?user_id=${studentId}`, {
             headers: { Authorization: `Bearer ${token}` }
+          }),
+          fetch(`${API_BASE_URL}/certificates/admin/users/${studentId}/certificates`, {
+            headers: { Authorization: `Bearer ${token}` }
           })
         ])
 
         const coursesRaw = await coursesResponse.text()
         const enrolledRaw = await enrolledResponse.text()
         const logsRaw = await logsResponse.text()
+        const certificatesRaw = await certificatesResponse.text()
 
         if (!coursesResponse.ok) {
           setDataError(coursesRaw || "Erro ao carregar cursos.")
@@ -264,11 +283,20 @@ export default function StudentAdminPage() {
           const logsData = logsRaw ? JSON.parse(logsRaw) : []
           setExamLogs(Array.isArray(logsData) ? logsData : [])
         }
+
+        if (!certificatesResponse.ok) {
+          setDataError((prev) => prev || certificatesRaw || "Erro ao carregar certificados.")
+          setCertificates([])
+        } else {
+          const certificatesData = certificatesRaw ? JSON.parse(certificatesRaw) : []
+          setCertificates(Array.isArray(certificatesData) ? certificatesData : [])
+        }
       } catch {
         setDataError("Falha ao conectar com o servidor.")
         setCourses([])
         setExamLogs([])
         setEnrolledCourseIds([])
+        setCertificates([])
       } finally {
         setIsLoadingData(false)
       }
@@ -343,6 +371,31 @@ export default function StudentAdminPage() {
     return { correct, total, points: Number(points.toFixed(2)) }
   }
 
+  const resolveAttemptPoints = (attempt: ApiExamLog, totalPoints: number) => {
+    if (typeof attempt.score_points === "number") {
+      return attempt.score_points
+    }
+    return (attempt.score_percent / 100) * totalPoints
+  }
+
+  const selectBestAttempt = (attempts: ApiExamLog[], totalPoints: number) => {
+    if (!attempts.length) return null
+    const corrected = attempts.filter((attempt) => attempt.status === "corrigido")
+    const pool = corrected.length ? corrected : attempts
+    return pool.reduce((best, current) => {
+      const bestScore = resolveAttemptPoints(best, totalPoints)
+      const currentScore = resolveAttemptPoints(current, totalPoints)
+      if (currentScore > bestScore) return current
+      if (currentScore < bestScore) return best
+      const bestTime = new Date(best.submitted_at).getTime()
+      const currentTime = new Date(current.submitted_at).getTime()
+      if (!Number.isNaN(currentTime) && !Number.isNaN(bestTime) && currentTime > bestTime) {
+        return current
+      }
+      return best
+    })
+  }
+
   const gradebook = useMemo(() => {
     return courses.map((course) => ({
       course,
@@ -354,20 +407,20 @@ export default function StudentAdminPage() {
           const attempts = studentAttempts.filter(
             (attempt) => attempt.course_id === course.id && attempt.exam_id === item.id
           )
-          const lastAttempt = attempts.length ? attempts[attempts.length - 1] : null
+          const bestAttempt = selectBestAttempt(attempts, totalPoints)
           let earnedPoints = 0
           let statusLabel = "Sem envio"
 
-          if (lastAttempt) {
-            if (lastAttempt.status === "corrigido") {
-              if (typeof lastAttempt.score_points === "number") {
-                earnedPoints = Number(lastAttempt.score_points.toFixed(1))
+          if (bestAttempt) {
+            if (bestAttempt.status === "corrigido") {
+              if (typeof bestAttempt.score_points === "number") {
+                earnedPoints = Number(bestAttempt.score_points.toFixed(1))
               } else {
-                earnedPoints = Number(((lastAttempt.score_percent / 100) * totalPoints).toFixed(1))
+                earnedPoints = Number(((bestAttempt.score_percent / 100) * totalPoints).toFixed(1))
               }
-              statusLabel = lastAttempt.result === "apto" ? "Apto" : "Reprovado"
+              statusLabel = bestAttempt.result === "apto" ? "Apto" : "Reprovado"
             } else {
-              const partial = sumObjectivePoints(questions, lastAttempt.answers)
+              const partial = sumObjectivePoints(questions, bestAttempt.answers)
               earnedPoints = Number(partial.points.toFixed(1))
               statusLabel = "Pendente"
             }
@@ -393,8 +446,135 @@ export default function StudentAdminPage() {
     }))
   }, [courses, studentAttempts])
 
-  const handleCertificateUpload = () => {
-    setDataError("Upload de certificado ainda nao esta disponivel.")
+  const certificatesByCourse = useMemo(() => {
+    const grouped = new Map<number, ApiCertificate[]>()
+    certificates.forEach((certificate) => {
+      const list = grouped.get(certificate.course_id) ?? []
+      list.push(certificate)
+      grouped.set(certificate.course_id, list)
+    })
+    grouped.forEach((list) =>
+      list.sort(
+        (a, b) =>
+          new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+      )
+    )
+    return grouped
+  }, [certificates])
+
+  const uploadTargetCourse = useMemo(
+    () => courses.find((course) => course.id === uploadTargetCourseId) || null,
+    [courses, uploadTargetCourseId]
+  )
+
+  const handleOpenUploadModal = (courseId: number) => {
+    setUploadTargetCourseId(courseId)
+    setUploadFile(null)
+    setUploadError("")
+    setShowUploadModal(true)
+  }
+
+  const handleCloseUploadModal = () => {
+    setShowUploadModal(false)
+    setUploadTargetCourseId(null)
+    setUploadFile(null)
+    setUploadError("")
+  }
+
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result)
+        } else {
+          reject(new Error("Arquivo invalido."))
+        }
+      }
+      reader.onerror = () => reject(new Error("Falha ao ler arquivo."))
+      reader.readAsDataURL(file)
+    })
+
+  const handleUpload = async () => {
+    if (!uploadTargetCourseId) {
+      setUploadError("Selecione um curso para enviar o certificado.")
+      return
+    }
+    if (!uploadFile) {
+      setUploadError("Selecione um arquivo PDF para enviar.")
+      return
+    }
+
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+    if (!token) {
+      setUploadError("Token nao encontrado. Faca login novamente.")
+      return
+    }
+
+    setIsUploading(true)
+    setUploadError("")
+
+    try {
+      const base64 = await readFileAsBase64(uploadFile)
+      const payload = {
+        file_name: uploadFile.name,
+        file_content_base64: base64
+      }
+      const response = await fetch(
+        `${API_BASE_URL}/certificates/admin/users/${studentId}/courses/${uploadTargetCourseId}/certificates`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        }
+      )
+
+      const { data, raw } = await readJsonResponse<ApiCertificate>(response)
+      if (!response.ok || !data) {
+        setUploadError(resolveApiError(raw, data, "Falha ao enviar certificado."))
+        return
+      }
+
+      setCertificates((prev) => [data, ...prev])
+      handleCloseUploadModal()
+    } catch {
+      setUploadError("Falha ao conectar com o servidor.")
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleDeleteCertificate = async (certificateId: number) => {
+    const token = localStorage.getItem(ACCESS_TOKEN_KEY)
+    if (!token) {
+      setDataError("Token nao encontrado. Faca login novamente.")
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/certificates/admin/certificates/${certificateId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      )
+
+      if (!response.ok) {
+        const { data, raw } = await readJsonResponse<{ detail?: string }>(response)
+        setDataError(resolveApiError(raw, data, "Falha ao excluir certificado."))
+        return
+      }
+
+      setCertificates((prev) => prev.filter((item) => item.id !== certificateId))
+    } catch {
+      setDataError("Falha ao conectar com o servidor.")
+    }
   }
 
   const handleEssaySave = async (attemptId: number, totalPoints: number) => {
@@ -406,11 +586,22 @@ export default function StudentAdminPage() {
     }
 
     const draft = essayDrafts[attemptId]
-    const rawPoints = Number(draft?.grade || 0)
-    const safePoints = Number.isFinite(rawPoints) ? rawPoints : 0
-    const clampedPoints = Math.max(0, totalPoints > 0 ? Math.min(safePoints, totalPoints) : safePoints)
-    const percent = totalPoints > 0 ? Math.round((clampedPoints / totalPoints) * 100) : 0
     const attempt = examLogs.find((item) => item.id === attemptId)
+    const context = buildAttemptContext(attemptId)
+    const rawPoints = Number(draft?.grade || 0)
+    const essayPoints = Number.isFinite(rawPoints) ? rawPoints : 0
+    const objectivePoints =
+      typeof attempt?.score_points === "number"
+        ? attempt.score_points
+        : context
+          ? sumObjectivePoints(context.questions, attempt?.answers || {}).points
+          : 0
+    const combinedPoints = objectivePoints + essayPoints
+    const clampedPoints = Math.max(
+      0,
+      totalPoints > 0 ? Math.min(combinedPoints, totalPoints) : combinedPoints
+    )
+    const percent = totalPoints > 0 ? Math.round((clampedPoints / totalPoints) * 100) : 0
     const cutScore = attempt?.cut_score ?? 0
     const result = percent >= cutScore ? "apto" : "nao_apto"
 
@@ -485,12 +676,6 @@ export default function StudentAdminPage() {
       setEnrolledCourseIds(previousIds)
     }
   }
-
-  const documents: Array<{ id: number; name: string; uploadedAt: string; status: string }> = []
-  const certificate = null
-  const certificateLabel = certificate?.fileUrl
-    ? certificate.fileUrl.split("/").pop() || "Certificado"
-    : "Certificado"
 
   if (isLoadingStudent) {
     return (
@@ -575,71 +760,73 @@ export default function StudentAdminPage() {
           <div className="border border-border bg-black p-4">
             <h2 className="text-sm font-bold uppercase tracking-wider text-[#F4511E]">Documentos</h2>
             <div className="mt-4 space-y-3">
-              {documents.length === 0 ? (
-                <p className="text-xs text-[#6b7a5f]">Nenhum documento enviado.</p>
-              ) : (
-                documents.map((doc) => (
-                  <div key={doc.id} className="border border-border p-3 space-y-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <div>
-                        <p className="text-[#6b7a5f] uppercase tracking-wider">{doc.name}</p>
-                        <p className="text-[10px] text-[#6b7a5f]">{doc.uploadedAt}</p>
-                      </div>
-                      <span className="text-[#F4511E] uppercase tracking-wider">{doc.status}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        disabled
-                        className="flex-1 bg-[#F4511E] text-black rounded-none text-xs"
-                      >
-                        Aprovar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        disabled
-                        className="flex-1 border-border rounded-none text-xs"
-                      >
-                        Recusar
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              )}
+              <p className="text-xs text-[#6b7a5f]">Nenhum documento enviado.</p>
             </div>
           </div>
 
           <div className="border border-border bg-black p-4">
             <div className="flex items-center gap-2 text-[#F4511E]">
               <UploadCloud className="h-4 w-4" />
-              <h2 className="text-sm font-bold uppercase tracking-wider">Certificado Externo</h2>
+              <h2 className="text-sm font-bold uppercase tracking-wider">Certificados por curso</h2>
             </div>
-            {certificate ? (
-              <div className="mt-3 space-y-2 text-xs">
-                <div>
-                  <p className="text-[#6b7a5f] uppercase tracking-wider">Arquivo atual</p>
-                  <p className="text-foreground break-all">{certificateLabel}</p>
-                  <p className="text-[10px] text-[#6b7a5f]">Curso {certificate.courseId}</p>
-                </div>
-                <Button
-                  asChild
-                  variant="outline"
-                  className="border-border rounded-none"
-                >
-                  <a href={certificate.fileUrl} download>
-                    Baixar certificado
-                  </a>
-                </Button>
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-[#6b7a5f]">Nenhum certificado enviado.</p>
-            )}
-            <Button
-              onClick={handleCertificateUpload}
-              className="mt-4 bg-[#F4511E] text-black rounded-none"
-            >
-              {certificate ? "Atualizar certificado" : "Upload de certificado"}
-            </Button>
-            <p className="mt-2 text-[10px] text-[#6b7a5f]">Integracao pendente com a API.</p>
+            <div className="mt-4 space-y-3">
+              {courses.length === 0 ? (
+                <p className="text-xs text-[#6b7a5f]">Nenhum curso disponivel.</p>
+              ) : (
+                courses.map((course) => {
+                  const isEnrolled = enrolledCourseIds.includes(course.id)
+                  const courseCertificates = certificatesByCourse.get(course.id) ?? []
+                  return (
+                    <div key={course.id} className="border border-border p-3 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">{course.code}</p>
+                          <p className="text-sm text-foreground">{course.name}</p>
+                        </div>
+                        <Button
+                          onClick={() => handleOpenUploadModal(course.id)}
+                          disabled={!isEnrolled}
+                          className="bg-[#F4511E] text-black rounded-none text-xs"
+                        >
+                          Upload certificado
+                        </Button>
+                      </div>
+                      {courseCertificates.length === 0 ? (
+                        <p className="text-xs text-[#6b7a5f]">Nenhum certificado enviado.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {courseCertificates.map((certificate) => (
+                            <div
+                              key={certificate.id}
+                              className="border border-border p-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+                            >
+                              <div>
+                                <p className="text-foreground break-all">{certificate.file_name}</p>
+                                <p className="text-[10px] text-[#6b7a5f]">
+                                  {formatDateTime(certificate.uploaded_at)}
+                                </p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                className="border-border rounded-none text-[10px]"
+                                onClick={() => handleDeleteCertificate(certificate.id)}
+                              >
+                                Remover
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {!isEnrolled && (
+                        <p className="text-[10px] text-[#6b7a5f]">
+                          Aluno nao matriculado neste curso.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })
+              )}
+            </div>
           </div>
         </section>
 
@@ -782,7 +969,61 @@ export default function StudentAdminPage() {
           </div>
         </section>
       </div>
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md border border-border bg-black p-4 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs text-[#6b7a5f] uppercase tracking-wider">Upload de certificado</p>
+                <p className="text-sm text-foreground">
+                  {uploadTargetCourse?.name || "Curso"}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleCloseUploadModal}
+                className="border-border rounded-none text-xs"
+              >
+                Fechar
+              </Button>
+            </div>
 
+            <div className="space-y-2">
+              <p className="text-[10px] uppercase tracking-wider text-[#6b7a5f]">Arquivo PDF</p>
+              <Input
+                type="file"
+                accept="application/pdf"
+                onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+                className="border-border bg-black rounded-none text-xs"
+              />
+              {uploadFile && (
+                <p className="text-[10px] text-[#6b7a5f]">Selecionado: {uploadFile.name}</p>
+              )}
+            </div>
+
+            {uploadError && (
+              <p className="text-xs text-red-500">{uploadError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={handleCloseUploadModal}
+                className="border-border rounded-none text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleUpload}
+                disabled={isUploading}
+                className="bg-[#F4511E] text-black rounded-none text-xs"
+              >
+                {isUploading ? "Enviando..." : "Enviar certificado"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -794,7 +1035,7 @@ type AttemptReviewProps = {
     moduleName?: string
     activityName: string
     questions: ApiQuestion[]
-    totalPoints?: number
+    totalPoints?: number | null
   } | null
   draft?: { grade?: string; feedback?: string }
   onDraftChange: (patch: { grade?: string; feedback?: string }) => void
